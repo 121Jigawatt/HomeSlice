@@ -1,10 +1,11 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api, OrcaStatus } from "../api";
+import { api, OrcaStatus, Printer, PrinterStatus } from "../api";
 
 export default function SettingsPage({ username, onLogout }: { username: string; onLogout: () => void }) {
   return (
     <section className="stack">
       <h2>Settings</h2>
+      <Printers />
       <OrcaVersions />
       <PasswordForm />
       <div className="card row between">
@@ -19,6 +20,95 @@ export default function SettingsPage({ username, onLogout }: { username: string;
         </button>
       </div>
     </section>
+  );
+}
+
+function Printers() {
+  const [printers, setPrinters] = useState<Printer[]>([]);
+  const [states, setStates] = useState<Record<string, string>>({});
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api<Printer[]>("/api/printers");
+      setPrinters(list);
+      for (const p of list) {
+        api<PrinterStatus>(`/api/printers/${p.id}/status`)
+          .then((s) => setStates((prev) => ({ ...prev, [p.id]: s.state })))
+          .catch((e) => setStates((prev) => ({ ...prev, [p.id]: `offline: ${e.message}` })));
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api("/api/printers", { method: "POST", json: { name, url, api_key: apiKey || null } });
+      setName("");
+      setUrl("");
+      setApiKey("");
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function remove(p: Printer) {
+    if (!confirm(`Remove ${p.name}?`)) return;
+    await api(`/api/printers/${p.id}`, { method: "DELETE" }).catch((e) => setError(e.message));
+    load();
+  }
+
+  return (
+    <div className="card stack">
+      <strong>Printers</strong>
+      {printers.length === 0 && <p className="muted small">No printers yet. Add a Klipper (Mainsail/Fluidd) printer below.</p>}
+      <ul className="list">
+        {printers.map((p) => (
+          <li key={p.id} className="row between small">
+            <div className="grow">
+              <div className="title">{p.name}</div>
+              <div className="muted">
+                {p.url} · {states[p.id] ?? "checking…"}
+              </div>
+            </div>
+            <button className="small danger" onClick={() => remove(p)} aria-label={`Remove ${p.name}`}>
+              ✕
+            </button>
+          </li>
+        ))}
+      </ul>
+      <form className="stack" onSubmit={add}>
+        <input placeholder="Name (e.g. SV08)" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} required />
+        <input
+          placeholder="Address, e.g. http://10.69.69.165"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          inputMode="url"
+          required
+        />
+        <input
+          type="password"
+          placeholder="Moonraker API key (optional)"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          autoComplete="off"
+        />
+        <p className="muted small">Use the printer's IP address. <code>.local</code> names don't resolve inside the container.</p>
+        {error && <p className="error">{error}</p>}
+        <button className="small">Add printer</button>
+      </form>
+    </div>
   );
 }
 

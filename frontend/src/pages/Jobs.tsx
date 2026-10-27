@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, Job } from "../api";
+import { api, Job, Printer, PrinterStatus } from "../api";
 
 const ACTIVE = new Set(["queued", "running"]);
 
@@ -120,6 +120,7 @@ export function JobPage() {
           ))}
         </div>
       )}
+      {job.status === "done" && <SendToPrinter job={job} />}
       <div className="row">
         <button className="small secondary" onClick={() => api<string>(`/api/jobs/${id}/log`).then(setLog)}>
           Show log
@@ -132,5 +133,95 @@ export function JobPage() {
       </div>
       {log !== null && <pre className="log">{log || "(empty)"}</pre>}
     </section>
+  );
+}
+
+function SendToPrinter({ job }: { job: Job }) {
+  const gcodes = job.files.filter((f) => f.endsWith(".gcode"));
+  const [printers, setPrinters] = useState<Printer[] | null>(null);
+  const [printerId, setPrinterId] = useState(() => localStorage.getItem("send.printer") ?? "");
+  const [file, setFile] = useState(gcodes[0] ?? "");
+  const [state, setState] = useState<string | null>(null);
+  const [start, setStart] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    api<Printer[]>("/api/printers")
+      .then((list) => {
+        setPrinters(list);
+        setPrinterId((cur) => (list.some((p) => p.id === cur) ? cur : list[0]?.id ?? ""));
+      })
+      .catch((e) => setMsg({ ok: false, text: e.message }));
+  }, []);
+
+  useEffect(() => {
+    setState(null);
+    if (!printerId) return;
+    api<PrinterStatus>(`/api/printers/${printerId}/status`)
+      .then((s) => setState(s.state))
+      .catch((e) => setState(`offline: ${e.message}`));
+  }, [printerId]);
+
+  if (gcodes.length === 0 || printers === null) return null;
+  if (printers.length === 0)
+    return (
+      <p className="muted small">
+        Add a printer in <Link to="/settings">Settings</Link> to send prints directly.
+      </p>
+    );
+
+  async function send() {
+    setBusy(true);
+    setMsg(null);
+    localStorage.setItem("send.printer", printerId);
+    try {
+      const r = await api<{ printer: string; filename: string; print_started: boolean }>(`/api/jobs/${job.id}/send`, {
+        method: "POST",
+        json: { printer_id: printerId, file, start },
+      });
+      setMsg({ ok: true, text: r.print_started ? `Printing on ${r.printer}.` : `Uploaded to ${r.printer} as ${r.filename}.` });
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card stack">
+      <strong>Send to printer</strong>
+      <label>
+        Printer
+        <select value={printerId} onChange={(e) => setPrinterId(e.target.value)}>
+          {printers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="muted small">Status: {state ?? "checking…"}</div>
+      {gcodes.length > 1 && (
+        <label>
+          File
+          <select value={file} onChange={(e) => setFile(e.target.value)}>
+            {gcodes.map((f) => (
+              <option key={f}>{f}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label className="row check">
+        <input type="checkbox" checked={start} onChange={(e) => setStart(e.target.checked)} /> Start printing now
+      </label>
+      {msg && <p className={msg.ok ? "muted" : "error"}>{msg.text}</p>}
+      <button
+        disabled={busy || !printerId || !file}
+        onClick={() => (!start || confirm("Start printing now? Make sure the bed is clear.")) && send()}
+      >
+        {busy ? "Sending…" : start ? "Send & print" : "Send"}
+      </button>
+    </div>
   );
 }

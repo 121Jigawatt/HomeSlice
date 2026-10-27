@@ -50,6 +50,14 @@ CREATE TABLE IF NOT EXISTS jobs(
     finished_at REAL
 );
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS printers(
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    url TEXT NOT NULL,
+    api_key TEXT,
+    created_at REAL NOT NULL
+);
 """
 
 

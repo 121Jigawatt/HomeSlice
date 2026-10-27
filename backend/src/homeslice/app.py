@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from .api import auth_routes, library_routes, orca_routes, slicing_routes
+from .api import auth_routes, library_routes, orca_routes, printer_routes, slicing_routes
 from .auth import AuthService
 from .config import Settings
 from .crypto import SecretBox
@@ -19,6 +19,7 @@ from .orca.jobs import JobManager
 from .orca.profiles import ProfileStore
 from .orca.updater import UpdateError, Updater
 from .orca.versions import VersionStore
+from .printers.service import Printers
 
 log = logging.getLogger("homeslice")
 
@@ -70,6 +71,7 @@ class Services:
     versions: VersionStore
     updater: Updater
     jobs: JobManager
+    printers: Printers
     background_tasks: set[asyncio.Task] = field(default_factory=set)
 
 
@@ -79,16 +81,18 @@ def build_services(settings: Settings) -> Services:
     versions = VersionStore(settings.orca_dir)
     library = Library(db, settings)
     profiles = ProfileStore(settings.orca_datadir, versions.system_profile_dirs())
+    secrets = SecretBox(settings.secret_key_file or settings.config_dir / "secret.key")
     return Services(
         settings=settings,
         db=db,
-        secrets=SecretBox(settings.secret_key_file or settings.config_dir / "secret.key"),
+        secrets=secrets,
         auth=AuthService(db, settings),
         library=library,
         profiles=profiles,
         versions=versions,
         updater=Updater(settings, versions),
         jobs=JobManager(db, settings, library, profiles, versions),
+        printers=Printers(db, secrets),
     )
 
 
@@ -157,7 +161,13 @@ def create_app(settings: Settings | None = None, *, start_background: bool = Tru
     def health() -> dict:
         return {"status": "ok"}
 
-    for router in (auth_routes.router, library_routes.router, slicing_routes.router, orca_routes.router):
+    for router in (
+        auth_routes.router,
+        library_routes.router,
+        slicing_routes.router,
+        printer_routes.router,
+        orca_routes.router,
+    ):
         app.include_router(router)
 
     if settings.frontend_dist and (settings.frontend_dist / "index.html").is_file():

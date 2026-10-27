@@ -105,6 +105,21 @@ export interface Job {
   finished_at: number | null;
 }
 
+export interface Printer {
+  id: string;
+  name: string;
+  kind: string;
+  url: string;
+  has_api_key: boolean;
+}
+
+export interface PrinterStatus {
+  state: string;
+  filename: string | null;
+  progress: number | null;
+  message: string | null;
+}
+
 export interface ReleaseInfo {
   tag: string;
   name: string;

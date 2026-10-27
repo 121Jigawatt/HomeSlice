@@ -63,6 +63,7 @@ Frontend (needs Node 22): `cd frontend; npm install; npm run dev`, then open htt
 - [x] Phase 1–2: container, version manager, auth, library, slicing queue, streamed GUI
 - [x] Phase 3 (basic): mobile UI for library, slicing, jobs and settings
 - [ ] Phase 3: 3D plate viewer and G-code preview
-- [ ] Phase 4: printer connectors (Moonraker, OctoPrint, PrusaLink, Bambu LAN, Creality)
+- [x] Phase 4 (part): send to Klipper/Moonraker printers (Mainsail, Fluidd), optional auto-start
+- [ ] Phase 4: other printer connectors (OctoPrint, PrusaLink, Bambu LAN, Creality)
 - [ ] Phase 5: model browser (Thingiverse, Printables, share-to-app import)
 - [ ] Phase 0 checks to run on real hardware: headless CLI inside the container, preset flattening accepted by the CLI
