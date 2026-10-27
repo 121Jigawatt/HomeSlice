@@ -3,6 +3,8 @@
 services:
   homeslice:
     image: ghcr.io/121jigawatt/homeslice:latest
+    # Without this, redeploying keeps the cached :latest image.
+    pull_policy: always
     container_name: homeslice
     restart: unless-stopped
     environment:
