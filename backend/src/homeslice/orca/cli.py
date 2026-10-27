@@ -143,6 +143,8 @@ def build_args(binary: Path, spec: SliceSpec, outdir: Path, datadir: Path, logfi
         args += ["--orient", "1"]
     for key, value in validate_overrides(spec.overrides).items():
         args.append(f"--{key.replace('_', '-')}={value}")
+    # 3MFs saved by newer Bambu Studio/Orca builds are otherwise refused outright (the GUI only warns).
+    args.append("--allow-newer-file")
     args += ["--slice", str(spec.plate), "--export-3mf", "result.gcode.3mf"]
     args += [_safe_path(p) for p in spec.inputs]
     return args

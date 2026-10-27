@@ -68,6 +68,7 @@ def spec(tmp_path: Path, **kw) -> SliceSpec:
 def test_build_args(tmp_path):
     args = build_args(tmp_path / "AppRun", spec(tmp_path, overrides={"layer_height": "0.2"}), tmp_path, tmp_path, tmp_path / "l")
     assert "--layer-height=0.2" in args
+    assert "--allow-newer-file" in args
     assert args[args.index("--slice") + 1] == "0"
     assert args[-1] == str(tmp_path / "m.stl")
 
