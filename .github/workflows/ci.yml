@@ -54,7 +54,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/orcaserver
+          images: ghcr.io/${{ github.repository_owner }}/homeslice
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
@@ -63,10 +63,10 @@ jobs:
         with:
           context: .
           load: true
-          tags: orcaserver:scan
+          tags: homeslice:scan
       - uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: orcaserver:scan
+          image-ref: homeslice:scan
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"

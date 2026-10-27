@@ -25,8 +25,8 @@ export default function App() {
   useEffect(() => {
     refresh();
     const onUnauthorized = () => refresh();
-    window.addEventListener("orcaserver:unauthorized", onUnauthorized);
-    return () => window.removeEventListener("orcaserver:unauthorized", onUnauthorized);
+    window.addEventListener("homeslice:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("homeslice:unauthorized", onUnauthorized);
   }, [refresh]);
 
   if (error) return <div className="center card error">Cannot reach server: {error}</div>;
@@ -37,7 +37,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <span className="brand">OrcaServer</span>
+        <span className="brand">HomeSlice</span>
         <a className="button small secondary" href="/gui/">
           Full Orca
         </a>

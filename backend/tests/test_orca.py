@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from orcaserver.orca.cli import SliceArgsError, SliceSpec, build_args, validate_overrides
-from orcaserver.orca.profiles import ProfileError, ProfileStore
+from homeslice.orca.cli import SliceArgsError, SliceSpec, build_args, validate_overrides
+from homeslice.orca.profiles import ProfileError, ProfileStore
 
 
 def write(path: Path, data: dict) -> None:

@@ -6,10 +6,10 @@ import httpx
 import pytest
 from conftest import binary_stl
 
-from orcaserver.config import Settings
-from orcaserver.net.safe_fetch import SafeFetcher
-from orcaserver.orca.updater import UpdateError, Updater, pick_asset, to_release_info
-from orcaserver.orca.versions import VersionError, VersionStore
+from homeslice.config import Settings
+from homeslice.net.safe_fetch import SafeFetcher
+from homeslice.orca.updater import UpdateError, Updater, pick_asset, to_release_info
+from homeslice.orca.versions import VersionError, VersionStore
 
 PAYLOAD = b"fake appimage"
 
@@ -83,7 +83,7 @@ def test_version_store_rollback(tmp_path):
     store = VersionStore(tmp_path)
     for v in ("a", "b"):
         (store.versions_dir / v).mkdir()
-        (store.versions_dir / v / ".orcaserver.json").write_text(json.dumps({"installed_at": time.time()}))
+        (store.versions_dir / v / ".homeslice.json").write_text(json.dumps({"installed_at": time.time()}))
     store.activate("a")
     store.activate("b")
     assert store.rollback() == "a" and store.current() == "a"

@@ -12,10 +12,10 @@ FROM ghcr.io/linuxserver/baseimage-kasmvnc:ubuntunoble
 ENV TITLE="OrcaSlicer" \
     SUBFOLDER="/gui/" \
     NO_DECOR="true" \
-    ORCASERVER_CONFIG_DIR=/config/orcaserver \
-    ORCASERVER_DATA_DIR=/data \
-    ORCASERVER_ORCA_DATADIR=/config/.config/OrcaSlicer \
-    ORCASERVER_FRONTEND_DIST=/app/frontend \
+    HOMESLICE_CONFIG_DIR=/config/homeslice \
+    HOMESLICE_DATA_DIR=/data \
+    HOMESLICE_ORCA_DATADIR=/config/.config/OrcaSlicer \
+    HOMESLICE_FRONTEND_DIST=/app/frontend \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 

@@ -4,9 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="ORCASERVER_")
+    model_config = SettingsConfigDict(env_prefix="HOMESLICE_")
 
-    config_dir: Path = Path("/config/orcaserver")
+    config_dir: Path = Path("/config/homeslice")
     data_dir: Path = Path("/data")
     # Shared with the streamed GUI so both see the same presets.
     orca_datadir: Path = Path("/config/.config/OrcaSlicer")
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     @property
     def db_path(self) -> Path:
-        return self.config_dir / "orcaserver.db"
+        return self.config_dir / "homeslice.db"
 
     def ensure_dirs(self) -> None:
         for d in (self.config_dir, self.library_dir, self.jobs_dir, self.tmp_dir, self.orca_dir):

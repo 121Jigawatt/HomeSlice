@@ -1,6 +1,6 @@
 {
-  "name": "OrcaServer",
-  "short_name": "OrcaServer",
+  "name": "HomeSlice",
+  "short_name": "HomeSlice",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0b1220",

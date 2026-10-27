@@ -63,7 +63,7 @@ class AuthService:
         if not self._setup_token_file.exists():
             write_private_file(self._setup_token_file, secrets.token_urlsafe(24).encode())
         token = self._setup_token_file.read_text().strip()
-        log.warning("OrcaServer first-run setup token: %s", token)
+        log.warning("HomeSlice first-run setup token: %s", token)
         return token
 
     def validate_password(self, password: str) -> None:

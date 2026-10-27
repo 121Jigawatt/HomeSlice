@@ -1,23 +1,23 @@
-# OrcaServer
+# HomeSlice
 
 Self-hosted, mobile-friendly web front-end for [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer), plus the full OrcaSlicer desktop streamed into the browser. Both use the same profiles.
 
-OrcaServer **does not fork OrcaSlicer**. It downloads the official Linux release from GitHub, checks it against the SHA-256 that GitHub publishes, and runs it as-is. Staying up to date means picking a channel (stable / pre-release / nightly) in **Settings**.
+HomeSlice is an independent project, not affiliated with OrcaSlicer. It **does not fork OrcaSlicer**. It downloads the official Linux release from GitHub, checks it against the SHA-256 that GitHub publishes, and runs it as-is. Staying up to date means picking a channel (stable / pre-release / nightly) in **Settings**.
 
 ## How it fits together
 
 | Path | What | Notes |
 |---|---|---|
 | `/` | Web app (React PWA) | Library, slicing with your presets, jobs, updates |
-| `/gui/` | Full OrcaSlicer desktop (KasmVNC) | Requires an OrcaServer login (nginx `auth_request`) |
+| `/gui/` | Full OrcaSlicer desktop (KasmVNC) | Requires a HomeSlice login (nginx `auth_request`) |
 | `/api/*` | FastAPI backend | Runs the OrcaSlicer CLI in a sandboxed job queue |
 
 Volumes: `/config` holds OrcaSlicer presets, the database, the secret key and the setup token. `/data` holds the model library, job output and installed OrcaSlicer builds.
 
 ## Install on TrueNAS SCALE
 
-1. Push this repo to GitHub. The CI workflow builds `ghcr.io/<you>/orcaserver`. Make the package public, or add GHCR credentials in TrueNAS.
-2. Create datasets such as `tank/apps/orcaserver/config` and `tank/apps/orcaserver/data`.
+1. Push this repo to GitHub. The CI workflow builds `ghcr.io/<you>/homeslice`. Make the package public, or add GHCR credentials in TrueNAS.
+2. Create datasets such as `tank/apps/homeslice/config` and `tank/apps/homeslice/data`.
 3. Go to **Apps → Discover Apps → ⋮ → Install via YAML** and paste [deploy/truenas/docker-compose.yaml](deploy/truenas/docker-compose.yaml) after editing the image name and paths.
 4. Open the app logs and copy the **setup token** line. Then browse to `http://<nas>:8080` and create your admin account.
 5. Go to **Settings → Check for updates → Install** to download OrcaSlicer.
@@ -25,7 +25,7 @@ Volumes: `/config` holds OrcaSlicer presets, the database, the secret key and th
 
 ### Remote access (phone away from home)
 
-Use Tailscale or WireGuard; **don't** port-forward. With Tailscale on the NAS, run `tailscale serve --bg 8080`, then set `ORCASERVER_COOKIE_SECURE: "true"` and use the `https://<nas>.<tailnet>.ts.net` URL.
+Use Tailscale or WireGuard; **don't** port-forward. With Tailscale on the NAS, run `tailscale serve --bg 8080`, then set `HOMESLICE_COOKIE_SECURE: "true"` and use the `https://<nas>.<tailnet>.ts.net` URL.
 
 ## Security model
 
@@ -53,8 +53,8 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 .\.venv\Scripts\python -m pytest -q
-$env:ORCASERVER_CONFIG_DIR="..\dev-data\config"; $env:ORCASERVER_DATA_DIR="..\dev-data\data"; $env:ORCASERVER_ORCA_DATADIR="$env:APPDATA\OrcaSlicer"; $env:ORCASERVER_COOKIE_SECURE="false"
-.\.venv\Scripts\uvicorn orcaserver.app:create_app --factory --port 8000
+$env:HOMESLICE_CONFIG_DIR="..\dev-data\config"; $env:HOMESLICE_DATA_DIR="..\dev-data\data"; $env:HOMESLICE_ORCA_DATADIR="$env:APPDATA\OrcaSlicer"; $env:HOMESLICE_COOKIE_SECURE="false"
+.\.venv\Scripts\uvicorn homeslice.app:create_app --factory --port 8000
 ```
 
 Frontend (needs Node 22): `cd frontend; npm install; npm run dev`, then open http://localhost:5173.

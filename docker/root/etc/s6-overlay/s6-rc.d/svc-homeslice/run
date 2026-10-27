@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 
 # Bound to localhost: only reachable through the bundled nginx on :8080.
-exec s6-setuidgid abc /app/venv/bin/uvicorn orcaserver.app:create_app --factory \
+exec s6-setuidgid abc /app/venv/bin/uvicorn homeslice.app:create_app --factory \
     --host 127.0.0.1 --port 8000 \
     --proxy-headers --forwarded-allow-ips 127.0.0.1 \
     --no-server-header

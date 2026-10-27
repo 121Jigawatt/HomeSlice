@@ -94,7 +94,7 @@ class SafeFetcher:
             timeout=self._timeout,
             follow_redirects=False,
             trust_env=False,
-            headers={"User-Agent": "OrcaServer/0.1"},
+            headers={"User-Agent": "HomeSlice/0.1"},
         )
 
     async def _open(self, client: httpx.AsyncClient, url: str, headers: dict[str, str] | None) -> httpx.Response:

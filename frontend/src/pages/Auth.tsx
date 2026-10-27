@@ -36,7 +36,7 @@ export function LoginPage({ onDone }: { onDone: () => void }) {
 
   return (
     <form className="center card stack" onSubmit={submit}>
-      <h1>OrcaServer</h1>
+      <h1>HomeSlice</h1>
       <label>
         Username
         <input autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
@@ -80,7 +80,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
 
   return (
     <form className="center card stack" onSubmit={submit}>
-      <h1>Welcome to OrcaServer</h1>
+      <h1>Welcome to HomeSlice</h1>
       <p className="muted">
         Enter the one-time setup token printed in the container log (search for “setup token”), then create your
         admin account.

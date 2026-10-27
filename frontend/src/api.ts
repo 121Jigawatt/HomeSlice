@@ -34,7 +34,7 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
   if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
   const r = await fetch(path, { method, headers, body, credentials: "same-origin" });
   if (!r.ok) {
-    if (r.status === 401) window.dispatchEvent(new Event("orcaserver:unauthorized"));
+    if (r.status === 401) window.dispatchEvent(new Event("homeslice:unauthorized"));
     throw new ApiError(r.status, await errorMessage(r));
   }
   if (r.status === 204) return undefined as T;

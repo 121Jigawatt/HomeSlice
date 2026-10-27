@@ -20,7 +20,7 @@ from .orca.profiles import ProfileStore
 from .orca.updater import UpdateError, Updater
 from .orca.versions import VersionStore
 
-log = logging.getLogger("orcaserver")
+log = logging.getLogger("homeslice")
 
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
@@ -145,7 +145,7 @@ def create_app(settings: Settings | None = None, *, start_background: bool = Tru
 
     docs = settings.enable_api_docs
     app = FastAPI(
-        title="OrcaServer",
+        title="HomeSlice",
         lifespan=lifespan,
         docs_url="/api/docs" if docs else None,
         redoc_url=None,

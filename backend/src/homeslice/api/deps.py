@@ -5,7 +5,7 @@ from fastapi import HTTPException, Request
 
 from ..auth import Session
 
-SESSION_COOKIE = "orcaserver_session"
+SESSION_COOKIE = "homeslice_session"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from orcaserver.net.safe_fetch import FetchError, SafeFetcher
+from homeslice.net.safe_fetch import FetchError, SafeFetcher
 
 
 def fetcher(handler, **kw) -> SafeFetcher:

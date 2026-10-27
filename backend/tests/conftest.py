@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from orcaserver.app import create_app
-from orcaserver.config import Settings
+from homeslice.app import create_app
+from homeslice.config import Settings
 
 PASSWORD = "correct horse battery"
 

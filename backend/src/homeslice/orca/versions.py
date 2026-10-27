@@ -67,7 +67,7 @@ class VersionStore:
         return [c for c in candidates if c.is_dir()]
 
     def metadata(self, version_id: str) -> dict[str, Any]:
-        meta = self._dir(version_id) / ".orcaserver.json"
+        meta = self._dir(version_id) / ".homeslice.json"
         try:
             return json.loads(meta.read_text())
         except (OSError, ValueError):
@@ -86,7 +86,7 @@ class VersionStore:
         if dest.exists():
             shutil.rmtree(dest)
         os.replace(extracted_root, dest)
-        (dest / ".orcaserver.json").write_text(json.dumps({**meta, "installed_at": time.time()}))
+        (dest / ".homeslice.json").write_text(json.dumps({**meta, "installed_at": time.time()}))
 
     def activate(self, version_id: str) -> None:
         if not self._dir(version_id).is_dir():

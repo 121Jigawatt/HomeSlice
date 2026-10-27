@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from conftest import binary_stl
 
-from orcaserver.library.validation import ValidationError, safe_display_name, validate_zip
+from homeslice.library.validation import ValidationError, safe_display_name, validate_zip
 
 
 def make_zip(path: Path, entries: dict[str, bytes]) -> Path:
