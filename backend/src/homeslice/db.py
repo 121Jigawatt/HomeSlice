@@ -56,9 +56,13 @@ CREATE TABLE IF NOT EXISTS printers(
     kind TEXT NOT NULL,
     url TEXT NOT NULL,
     api_key TEXT,
+    resolved_ip TEXT,
     created_at REAL NOT NULL
 );
 """
+
+# Columns added after a table first shipped: (table, column, type).
+ADDED_COLUMNS = [("printers", "resolved_ip", "TEXT")]
 
 
 class Database:
@@ -70,6 +74,10 @@ class Database:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            for table, column, coltype in ADDED_COLUMNS:
+                existing = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                if column not in existing:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:

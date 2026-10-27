@@ -1,6 +1,7 @@
 import re
 import uuid
 from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -27,6 +28,10 @@ class SendBody(BaseModel):
     start: bool = False
 
 
+class PrinterSettingsBody(BaseModel):
+    scan_subnet: str | None = Field(default=None, max_length=50)
+
+
 def _remote_name(services, job: dict, file: str) -> str:
     stem = "print"
     model_ids = job["params"].get("model_ids") or []
@@ -45,6 +50,24 @@ def _remote_name(services, job: dict, file: str) -> str:
 @router.get("/printers")
 def list_printers(request: Request, _: Session = Depends(require_session)) -> list[dict]:
     return request.app.state.services.printers.list()
+
+
+@router.get("/printers/settings")
+def get_printer_settings(request: Request, _: Session = Depends(require_session)) -> dict:
+    return {"scan_subnet": request.app.state.services.printers.scan_subnet()}
+
+
+@router.put("/printers/settings")
+def put_printer_settings(
+    body: PrinterSettingsBody, request: Request, session: Session = Depends(require_session)
+) -> dict:
+    services = request.app.state.services
+    try:
+        subnet = services.printers.set_scan_subnet(body.scan_subnet)
+    except PrinterError as e:
+        raise HTTPException(400, str(e)) from None
+    services.auth.audit(session.username, "printer_settings", f"scan_subnet={subnet}", client_ip(request))
+    return {"scan_subnet": subnet}
 
 
 @router.post("/printers", status_code=201)
@@ -76,9 +99,11 @@ async def printer_status(printer_id: str, request: Request, _: Session = Depends
     try:
         if printers.get(printer_id) is None:
             raise HTTPException(404, "Not found")
-        return await printers.client(printer_id).status()
+        client = await printers.client(printer_id)
+        status = await client.status()
     except PrinterError as e:
         raise HTTPException(502, str(e)) from None
+    return {**status, "address": urlsplit(client.base_url).hostname}
 
 
 @router.post("/jobs/{job_id}/send")
@@ -101,7 +126,7 @@ async def send_job(job_id: str, body: SendBody, request: Request, session: Sessi
         if printer is None:
             raise HTTPException(404, "Unknown printer")
         remote = _remote_name(services, job, body.file)
-        result = await services.printers.client(body.printer_id).upload(path, remote, start=body.start)
+        result = await (await services.printers.client(body.printer_id)).upload(path, remote, start=body.start)
     except PrinterBusy as e:
         raise HTTPException(409, str(e)) from None
     except PrinterError as e:

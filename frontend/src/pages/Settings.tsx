@@ -29,6 +29,8 @@ function Printers() {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [subnet, setSubnet] = useState("");
+  const [subnetMsg, setSubnetMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -37,7 +39,7 @@ function Printers() {
       setPrinters(list);
       for (const p of list) {
         api<PrinterStatus>(`/api/printers/${p.id}/status`)
-          .then((s) => setStates((prev) => ({ ...prev, [p.id]: s.state })))
+          .then((s) => setStates((prev) => ({ ...prev, [p.id]: s.address ? `${s.state} @ ${s.address}` : s.state })))
           .catch((e) => setStates((prev) => ({ ...prev, [p.id]: `offline: ${e.message}` })));
       }
     } catch (e) {
@@ -47,7 +49,26 @@ function Printers() {
 
   useEffect(() => {
     load();
+    api<{ scan_subnet: string | null }>("/api/printers/settings")
+      .then((s) => setSubnet(s.scan_subnet ?? ""))
+      .catch(() => undefined);
   }, [load]);
+
+  async function saveSubnet(e: FormEvent) {
+    e.preventDefault();
+    setSubnetMsg(null);
+    try {
+      const s = await api<{ scan_subnet: string | null }>("/api/printers/settings", {
+        method: "PUT",
+        json: { scan_subnet: subnet || null },
+      });
+      setSubnet(s.scan_subnet ?? "");
+      setSubnetMsg({ ok: true, text: "Saved." });
+      load();
+    } catch (err) {
+      setSubnetMsg({ ok: false, text: (err as Error).message });
+    }
+  }
 
   async function add(e: FormEvent) {
     e.preventDefault();
@@ -91,7 +112,7 @@ function Printers() {
       <form className="stack" onSubmit={add}>
         <input placeholder="Name (e.g. SV08)" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} required />
         <input
-          placeholder="Address, e.g. http://10.69.69.165"
+          placeholder="Address, e.g. http://spi-xi.local or http://10.69.69.165"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           inputMode="url"
@@ -104,9 +125,20 @@ function Printers() {
           onChange={(e) => setApiKey(e.target.value)}
           autoComplete="off"
         />
-        <p className="muted small">Use the printer's IP address. <code>.local</code> names don't resolve inside the container.</p>
         {error && <p className="error">{error}</p>}
         <button className="small">Add printer</button>
+      </form>
+      <form className="stack" onSubmit={saveSubnet}>
+        <label>
+          LAN range to search for printers by name
+          <input placeholder="e.g. 10.69.69.0/24" value={subnet} onChange={(e) => setSubnet(e.target.value)} />
+        </label>
+        <p className="muted small">
+          <code>.local</code> names don't resolve inside the container. With a range set, printers added by hostname are
+          found by the name Klipper reports, so they keep working when their IP changes.
+        </p>
+        {subnetMsg && <p className={subnetMsg.ok ? "muted small" : "error"}>{subnetMsg.text}</p>}
+        <button className="small secondary">Save range</button>
       </form>
     </div>
   );

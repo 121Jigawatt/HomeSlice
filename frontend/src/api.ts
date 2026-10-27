@@ -110,6 +110,7 @@ export interface Printer {
   name: string;
   kind: string;
   url: string;
+  address: string | null;
   has_api_key: boolean;
 }
 
@@ -118,6 +119,7 @@ export interface PrinterStatus {
   filename: string | null;
   progress: number | null;
   message: string | null;
+  address: string | null;
 }
 
 export interface ReleaseInfo {

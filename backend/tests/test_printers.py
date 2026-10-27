@@ -53,9 +53,16 @@ class FakeMoonraker:
     def __init__(self, state: str = "standby") -> None:
         self.state = state
         self.requests: list[httpx.Request] = []
+        # When set, only this address answers (simulates one printer on a LAN).
+        self.ip: str | None = None
+        self.hostname = "SPI-XI"
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        if self.ip and request.url.host != self.ip:
+            raise httpx.ConnectError("refused", request=request)
+        if request.url.path == "/printer/info":
+            return httpx.Response(200, json={"result": {"hostname": self.hostname, "state": "ready"}})
         if request.url.path == "/printer/objects/query":
             status = {"print_stats": {"state": self.state, "filename": ""}, "display_status": {"progress": 0.0}}
             return httpx.Response(200, json={"result": {"status": status}})
@@ -157,3 +164,79 @@ def test_send_requires_csrf(printer_setup):
     authed.headers.pop("X-CSRF-Token")
     r = authed.post(f"/api/jobs/{job_id}/send", json={"printer_id": printer["id"], "file": "plate_1.gcode"})
     assert r.status_code == 403
+
+
+@pytest.fixture
+def named_printer(authed):
+    services = authed.app.state.services
+    fake = FakeMoonraker()
+    fake.ip = "10.0.0.9"
+    services.printers.transport = httpx.MockTransport(fake)
+    services.printers.resolve = False
+    assert authed.put("/api/printers/settings", json={"scan_subnet": "10.0.0.0/28"}).status_code == 200
+    printer = authed.post("/api/printers", json={"name": "SV08", "url": "http://spi-xi.local"}).json()
+    return authed, fake, printer
+
+
+def test_hostname_found_by_scan_and_cached(named_printer):
+    authed, fake, printer = named_printer
+    r = authed.get(f"/api/printers/{printer['id']}/status")
+    assert r.status_code == 200, r.text
+    assert r.json()["address"] == "10.0.0.9" and r.json()["state"] == "standby"
+    assert authed.get("/api/printers").json()[0]["address"] == "10.0.0.9"
+    fake.requests.clear()
+    assert authed.get(f"/api/printers/{printer['id']}/status").status_code == 200
+    assert {q.url.host for q in fake.requests} == {"10.0.0.9"}
+
+
+def test_follows_address_change(named_printer):
+    authed, fake, printer = named_printer
+    assert authed.get(f"/api/printers/{printer['id']}/status").json()["address"] == "10.0.0.9"
+    fake.ip = "10.0.0.3"
+    r = authed.get(f"/api/printers/{printer['id']}/status")
+    assert r.status_code == 200 and r.json()["address"] == "10.0.0.3"
+
+
+def test_other_hostname_not_matched(named_printer):
+    authed, fake, printer = named_printer
+    fake.hostname = "Frank"
+    r = authed.get(f"/api/printers/{printer['id']}/status")
+    assert r.status_code == 502 and "spi-xi" in r.json()["detail"]
+
+
+def test_hostname_without_scan_range(authed):
+    services = authed.app.state.services
+    services.printers.transport = httpx.MockTransport(FakeMoonraker())
+    services.printers.resolve = False
+    printer = authed.post("/api/printers", json={"name": "SV08", "url": "http://spi-xi.local"}).json()
+    r = authed.get(f"/api/printers/{printer['id']}/status")
+    assert r.status_code == 502 and "LAN range" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("subnet", ["8.8.8.0/24", "10.0.0.0/16", "127.0.0.0/24", "nonsense"])
+def test_scan_subnet_rejected(authed, subnet):
+    assert authed.put("/api/printers/settings", json={"scan_subnet": subnet}).status_code == 400
+
+
+def test_scan_subnet_set_and_clear(authed):
+    r = authed.put("/api/printers/settings", json={"scan_subnet": "10.69.69.7/24"})
+    assert r.json() == {"scan_subnet": "10.69.69.0/24"}
+    assert authed.put("/api/printers/settings", json={"scan_subnet": ""}).json() == {"scan_subnet": None}
+
+
+def test_db_migration_adds_column(tmp_path):
+    import sqlite3
+
+    from homeslice.db import Database
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE printers(id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, "
+        "url TEXT NOT NULL, api_key TEXT, created_at REAL NOT NULL)"
+    )
+    conn.commit()
+    conn.close()
+    db = Database(path)
+    assert "resolved_ip" in {r["name"] for r in db.all("PRAGMA table_info(printers)")}
+    db.close()

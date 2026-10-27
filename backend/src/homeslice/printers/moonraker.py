@@ -9,6 +9,8 @@ import httpx
 
 # Klipper print_stats states in which starting a new print is safe.
 IDLE_STATES = {"standby", "complete", "cancelled", "error"}
+PROBE_TIMEOUT = 1.5
+MAX_SCAN_ADDRESSES = 1024
 
 
 class PrinterError(Exception):
@@ -47,6 +49,35 @@ def check_lan_ip(ip_str: str) -> None:
         raise PrinterError(f"{ip} is not a local network address")
 
 
+def parse_scan_subnet(value: str) -> str:
+    try:
+        net = ipaddress.ip_network(value.strip(), strict=False)
+    except ValueError:
+        raise PrinterError("Enter a range like 10.69.69.0/24") from None
+    if net.version != 4 or not net.is_private or net.is_loopback or net.is_link_local:
+        raise PrinterError("Range must be a private IPv4 network")
+    if net.num_addresses > MAX_SCAN_ADDRESSES:
+        raise PrinterError("Range is too large (at most /22)")
+    return str(net)
+
+
+def host_label(name: str) -> str:
+    """'spi-xi.local' and 'SPI-XI' both become 'spi-xi'."""
+    return name.strip().rstrip(".").split(".")[0].lower()
+
+
+async def probe_hostname(client: httpx.AsyncClient, base: str) -> str | None:
+    """Hostname a Moonraker instance reports, or None if nothing usable answers."""
+    try:
+        response = await client.get(f"{base}/printer/info", timeout=PROBE_TIMEOUT)
+        if response.status_code != 200:
+            return None
+        hostname = response.json().get("result", {}).get("hostname")
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+    return hostname if isinstance(hostname, str) else None
+
+
 class MoonrakerClient:
     """Klipper/Moonraker HTTP API (used by Mainsail and Fluidd)."""
 
@@ -64,6 +95,10 @@ class MoonrakerClient:
         self._transport = transport
         self._resolve = resolve
         self._timeout = timeout
+
+    @property
+    def base_url(self) -> str:
+        return self._base
 
     async def _check_host(self) -> None:
         if not self._resolve:
