@@ -23,6 +23,9 @@ from .printers.service import Printers
 
 log = logging.getLogger("homeslice")
 
+# Until OrcaSlicer is installed, keep retrying the first install this often.
+FIRST_INSTALL_RETRY_S = 300
+
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob: https:; connect-src 'self'; worker-src 'self' blob:; "
@@ -96,20 +99,31 @@ def build_services(settings: Settings) -> Services:
     )
 
 
-async def update_checker(services: Services) -> None:
+async def check_for_updates(services: Services) -> float:
+    """One update check. Installs OrcaSlicer on first run (or when auto-update is on); returns seconds to wait."""
     from .api.orca_routes import get_channel, run_install
 
+    interval = services.settings.update_check_interval_h * 3600
+    try:
+        channel = get_channel(services)
+        info = await services.updater.latest(channel)
+        services.db.set_setting("orca.latest", json.dumps({**info.to_dict(), "channel": channel}))
+    except UpdateError as e:
+        log.info("Update check failed: %s", e)
+        return FIRST_INSTALL_RETRY_S if services.versions.current() is None else interval
+    first_run = services.versions.current() is None
+    auto = services.db.get_setting("orca.auto_update", "0") == "1"
+    idle = services.updater.progress.get("state") == "idle"
+    if (first_run or auto) and idle and info.version_id != services.versions.current():
+        if first_run:
+            log.info("OrcaSlicer is not installed yet; installing %s from the %s channel", info.tag, channel)
+        await run_install(services, channel)
+    return FIRST_INSTALL_RETRY_S if services.versions.current() is None else interval
+
+
+async def update_checker(services: Services) -> None:
     while True:
-        try:
-            channel = get_channel(services)
-            info = await services.updater.latest(channel)
-            services.db.set_setting("orca.latest", json.dumps({**info.to_dict(), "channel": channel}))
-            auto = services.db.get_setting("orca.auto_update", "0") == "1"
-            if auto and info.version_id != services.versions.current():
-                await run_install(services, channel)
-        except UpdateError as e:
-            log.info("Update check failed: %s", e)
-        await asyncio.sleep(services.settings.update_check_interval_h * 3600)
+        await asyncio.sleep(await check_for_updates(services))
 
 
 def _mount_frontend(app: FastAPI, dist: Path) -> None:

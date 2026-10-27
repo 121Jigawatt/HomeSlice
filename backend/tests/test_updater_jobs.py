@@ -129,3 +129,57 @@ def test_rejects_plate_without_bed_temperature(authed, settings):
     assert r.status_code == 400 and "Cool Plate" in r.json()["detail"]
     r = authed.post("/api/jobs", json={**body, "overrides": {"curr_bed_type": "Textured PEI Plate"}})
     assert r.status_code == 202, r.text
+
+
+class _FakeRelease:
+    tag = "v9.9.9"
+    version_id = "v9.9.9-abc"
+
+    def to_dict(self) -> dict:
+        return {"tag": self.tag, "version_id": self.version_id}
+
+
+@pytest.fixture
+def checker(settings, monkeypatch):
+    from homeslice import app as app_module
+    from homeslice.api import orca_routes
+
+    services = app_module.build_services(settings)
+    installs: list[str] = []
+
+    async def latest(channel):
+        return _FakeRelease()
+
+    async def fake_install(svc, channel):
+        installs.append(channel)
+
+    monkeypatch.setattr(services.updater, "latest", latest)
+    monkeypatch.setattr(orca_routes, "run_install", fake_install)
+    yield app_module, services, installs
+    services.db.close()
+
+
+async def test_first_run_installs_orca(checker):
+    app_module, services, installs = checker
+    wait = await app_module.check_for_updates(services)
+    assert installs == ["stable"]
+    # Install was faked, so nothing is current yet: retry soon rather than in hours.
+    assert wait == app_module.FIRST_INSTALL_RETRY_S
+
+
+async def test_existing_install_not_replaced_without_auto_update(checker, monkeypatch):
+    app_module, services, installs = checker
+    monkeypatch.setattr(services.versions, "current", lambda: "v1.0.0-old")
+    wait = await app_module.check_for_updates(services)
+    assert installs == [] and wait == services.settings.update_check_interval_h * 3600
+
+
+async def test_first_run_retries_after_failed_check(checker, monkeypatch):
+    app_module, services, installs = checker
+
+    async def failing(channel):
+        raise UpdateError("offline")
+
+    monkeypatch.setattr(services.updater, "latest", failing)
+    assert await app_module.check_for_updates(services) == app_module.FIRST_INSTALL_RETRY_S
+    assert installs == []

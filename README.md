@@ -19,7 +19,7 @@ Volumes: `/config` holds OrcaSlicer presets, the database, the secret key and th
 1. Push this repo to GitHub. The CI workflow builds `ghcr.io/<you>/homeslice`. Make the package public, or add GHCR credentials in TrueNAS.
 2. Go to **Apps → Discover Apps → ⋮ → Install via YAML** and paste [deploy/truenas/docker-compose.yaml](deploy/truenas/docker-compose.yaml). Storage is created automatically in the apps pool's `ix-apps` dataset. To use your own datasets instead, replace the two named volumes with host paths.
 3. Open the app logs and copy the **setup token** line. Then browse to `https://<nas>:8443`, accept the self-signed certificate warning, and create your admin account.
-4. Go to **Settings → Check for updates → Install** to download OrcaSlicer.
+4. OrcaSlicer (stable channel) is downloaded and installed automatically on first start. Progress and the installed version are shown under **Settings**, where you can also switch channels or roll back.
 5. Open **Full Orca** once to import or create your printer, filament and process presets. They then appear on the **Slice** page.
 
 ### Remote access (phone away from home)
