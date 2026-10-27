@@ -110,6 +110,7 @@ class ProfileStore:
         index = self._ensure_index()
         chain: list[dict[str, Any]] = []
         seen: set[str] = set()
+        system_name: str | None = None
         current: str | None = name
         while current:
             if current in seen or len(chain) >= MAX_INHERIT_DEPTH:
@@ -118,6 +119,8 @@ class ProfileStore:
             ref = index.get((kind, current))
             if ref is None:
                 raise ProfileError(f"{kind} preset '{current}' not found")
+            if system_name is None and ref.source == "system":
+                system_name = current
             data = _read_json(ref.path)
             chain.append(data)
             parent = data.get("inherits")
@@ -127,7 +130,14 @@ class ProfileStore:
             merged.update(data)
         merged.pop("inherits", None)
         merged["name"] = name
-        merged["from"] = "User"
+        # Orca's CLI matches compatible_printers against the system name, which it reads from
+        # `inherits` for user presets, so keep the nearest system ancestor there.
+        if system_name == name:
+            merged["from"] = "system"
+        else:
+            merged["from"] = "User"
+            if system_name:
+                merged["inherits"] = system_name
         return merged
 
     def write_resolved(self, kind: str, name: str, dest: Path) -> Path:

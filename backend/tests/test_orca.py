@@ -29,7 +29,15 @@ def datadir(tmp_path: Path) -> Path:
 def test_resolve_inheritance(datadir):
     resolved = ProfileStore(datadir).resolve("printer", "My Voron")
     assert resolved["a"] == 1 and resolved["b"] == 2 and resolved["c"] == 3
-    assert "inherits" not in resolved and resolved["name"] == "My Voron"
+    assert resolved["name"] == "My Voron"
+    # Orca derives the system name from `inherits` for user presets.
+    assert resolved["from"] == "User" and resolved["inherits"] == "Voron 0.4"
+
+
+def test_resolve_system_preset(datadir):
+    resolved = ProfileStore(datadir).resolve("printer", "Voron 0.4")
+    assert resolved["from"] == "system" and "inherits" not in resolved
+    assert resolved["a"] == 1 and resolved["b"] == 2
 
 
 def test_listing(datadir):
