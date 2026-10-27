@@ -70,6 +70,19 @@ OVERRIDE_ALLOWLIST: dict[str, Callable[[str], str]] = {
     "brim_type": _enum("auto_brim", "brim_ears", "outer_only", "inner_only", "outer_and_inner", "no_brim"),
     "skirt_loops": _int_range(0, 10),
     "enable_prime_tower": _bool,
+    "curr_bed_type": _enum(
+        "Cool Plate", "Engineering Plate", "High Temp Plate", "Textured PEI Plate", "Textured Cool Plate", "Supertack Plate",
+    ),
+}
+
+# Filament preset key holding the first-layer bed temperature for each plate type.
+BED_TEMP_KEYS = {
+    "Cool Plate": "cool_plate_temp_initial_layer",
+    "Engineering Plate": "eng_plate_temp_initial_layer",
+    "High Temp Plate": "hot_plate_temp_initial_layer",
+    "Textured PEI Plate": "textured_plate_temp_initial_layer",
+    "Textured Cool Plate": "textured_cool_plate_temp_initial_layer",
+    "Supertack Plate": "supertack_plate_temp_initial_layer",
 }
 
 

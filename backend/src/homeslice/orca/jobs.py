@@ -14,7 +14,7 @@ from typing import Any
 from ..config import Settings
 from ..db import Database
 from ..library.service import Library
-from .cli import SliceArgsError, SliceSpec, build_args, run_orca, validate_overrides
+from .cli import BED_TEMP_KEYS, SliceArgsError, SliceSpec, build_args, run_orca, validate_overrides
 from .profiles import ProfileError, ProfileStore
 from .versions import VersionStore
 
@@ -100,6 +100,8 @@ class JobManager:
         for mid in req.model_ids:
             if self._library.path_for(mid) is None:
                 raise SliceArgsError("Unknown model")
+        if bed_type := req.overrides.get("curr_bed_type"):
+            self._check_bed_temps(bed_type, req.filaments)
         job_id = uuid.uuid4().hex
         self._db.execute(
             "INSERT INTO jobs(id, params, status, created_at) VALUES(?, ?, 'queued', ?)",
@@ -107,6 +109,24 @@ class JobManager:
         )
         self._queue.put_nowait(job_id)
         return job_id
+
+    def _check_bed_temps(self, bed_type: str, filaments: list[str]) -> None:
+        """A 0 °C plate temperature means the filament isn't meant for that plate; printers reject it."""
+        key = BED_TEMP_KEYS.get(bed_type)
+        if key is None:
+            return
+        for name in dict.fromkeys(filaments):
+            try:
+                value = self._profiles.resolve("filament", name).get(key)
+            except ProfileError as e:
+                raise SliceArgsError(str(e)) from None
+            first = value[0] if isinstance(value, list) and value else value
+            try:
+                temp = float(first)
+            except (TypeError, ValueError):
+                continue
+            if temp <= 0:
+                raise SliceArgsError(f"'{name}' has no bed temperature for {bed_type}. Choose another plate type.")
 
     def cancel(self, job_id: str) -> bool:
         task = self._running.get(job_id)

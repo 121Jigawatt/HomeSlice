@@ -93,3 +93,52 @@ def test_unsafe_paths_rejected(tmp_path):
     s.inputs = [Path("-evil.stl")]
     with pytest.raises(SliceArgsError):
         build_args(tmp_path / "AppRun", s, tmp_path, tmp_path, tmp_path / "l")
+
+
+@pytest.fixture
+def vendor_dir(tmp_path: Path) -> Path:
+    d = tmp_path / "orca2"
+    s = d / "system/Sovol"
+    write(s / "machine/fdm_sv08.json", {"name": "fdm_sv08", "instantiation": "false", "printer_model": "Sovol SV08"})
+    for nozzle in ("0.4", "0.6"):
+        write(
+            s / f"machine/Sovol SV08 {nozzle} nozzle.json",
+            {"name": f"Sovol SV08 {nozzle} nozzle", "inherits": "fdm_sv08", "printer_variant": nozzle},
+        )
+    write(s / "machine/Other 0.4.json", {"name": "Other 0.4", "printer_model": "Other", "printer_variant": "0.4"})
+    write(s / "process/SV08 0.4.json", {"name": "SV08 0.4", "compatible_printers": ["Sovol SV08 0.4 nozzle"]})
+    write(s / "process/SV08 0.6.json", {"name": "SV08 0.6", "compatible_printers": ["Sovol SV08 0.6 nozzle"]})
+    write(s / "process/Other.json", {"name": "Other", "compatible_printers": ["Other 0.4"]})
+    write(s / "filament/Sovol SV08 PETG.json", {"name": "Sovol SV08 PETG"})
+    write(s / "filament/Generic ABS.json", {"name": "Generic ABS"})
+    write(d / "user/default/machine/My SV08.json", {"name": "My SV08", "inherits": "Sovol SV08 0.6 nozzle"})
+    conf = {
+        "models": [{"vendor": "Sovol", "model": "Sovol SV08", "nozzle_diameter": "0.4"}],
+        "filaments": ["Sovol SV08 PETG"],
+    }
+    (d / "OrcaSlicer.conf").write_text(json.dumps(conf, indent=4) + "\n# MD5 checksum ABC\n")
+    return d
+
+
+def names(store: ProfileStore, kind: str) -> list[str]:
+    return [p["name"] for p in store.list(kind, include_system=True)]
+
+
+def test_system_presets_follow_orca_selections(vendor_dir):
+    store = ProfileStore(vendor_dir)
+    assert names(store, "printer") == ["My SV08", "Sovol SV08 0.4 nozzle", "Sovol SV08 0.6 nozzle"]
+    # 0.6 is not enabled, but the user's printer is based on it, so its processes stay visible.
+    assert names(store, "process") == ["SV08 0.4", "SV08 0.6"]
+    assert names(store, "filament") == ["Sovol SV08 PETG"]
+    assert [p["name"] for p in store.list("printer")] == ["My SV08"]
+
+
+def test_all_system_presets_without_orca_config(vendor_dir):
+    (vendor_dir / "OrcaSlicer.conf").unlink()
+    assert "Other 0.4" in names(ProfileStore(vendor_dir), "printer")
+
+
+def test_bed_type_override():
+    assert validate_overrides({"curr_bed_type": "Textured PEI Plate"}) == {"curr_bed_type": "Textured PEI Plate"}
+    with pytest.raises(SliceArgsError):
+        validate_overrides({"curr_bed_type": "Glass; --post-process=x"})

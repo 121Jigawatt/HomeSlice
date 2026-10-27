@@ -10,6 +10,7 @@ log = logging.getLogger(__name__)
 
 KIND_DIRS = {"printer": "machine", "filament": "filament", "process": "process"}
 MAX_PROFILE_BYTES = 2 * 1024**2
+MAX_APP_CONFIG_BYTES = 20 * 1024**2
 MAX_INHERIT_DEPTH = 20
 CACHE_TTL_S = 60
 
@@ -26,6 +27,21 @@ class PresetRef:
     path: Path
     visible: bool
     inherits: str | None
+    printer_model: str | None = None
+    printer_variant: str | None = None
+    compatible_printers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Selections:
+    """What the user enabled in Orca's configuration wizard (OrcaSlicer.conf)."""
+
+    printers: frozenset[tuple[str, str]]
+    filaments: frozenset[str]
+
+
+def _str_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -44,6 +60,7 @@ class ProfileStore:
         self._datadir = orca_datadir
         self._extra_system_dirs = extra_system_dirs or []
         self._index: dict[tuple[str, str], PresetRef] = {}
+        self._selections: Selections | None = None
         self._scanned_at = 0.0
         self._lock = threading.Lock()
 
@@ -71,7 +88,44 @@ class ProfileStore:
                     continue
                 visible = source == "user" or str(data.get("instantiation", "true")).lower() == "true"
                 inherits = data.get("inherits") if isinstance(data.get("inherits"), str) else None
-                index[key] = PresetRef(name, kind, source, path, visible, inherits or None)
+                compat = data.get("compatible_printers")
+                index[key] = PresetRef(
+                    name,
+                    kind,
+                    source,
+                    path,
+                    visible,
+                    inherits or None,
+                    _str_or_none(data.get("printer_model")),
+                    _str_or_none(data.get("printer_variant")),
+                    tuple(c for c in compat if isinstance(c, str)) if isinstance(compat, list) else (),
+                )
+
+    def _load_selections(self) -> Selections | None:
+        path = self._datadir / "OrcaSlicer.conf"
+        try:
+            if path.stat().st_size > MAX_APP_CONFIG_BYTES:
+                return None
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        # Orca appends a "# MD5 checksum" line after the JSON.
+        body = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        try:
+            data = json.loads(body)
+        except ValueError:
+            log.warning("Could not parse %s; showing all system presets", path)
+            return None
+        if not isinstance(data, dict):
+            return None
+        printers: set[tuple[str, str]] = set()
+        for entry in data.get("models") or []:
+            if isinstance(entry, dict) and isinstance(entry.get("model"), str):
+                for nozzle in str(entry.get("nozzle_diameter", "")).split(";"):
+                    if nozzle.strip():
+                        printers.add((entry["model"], nozzle.strip()))
+        filaments = {f for f in data.get("filaments") or [] if isinstance(f, str)}
+        return Selections(frozenset(printers), frozenset(filaments))
 
     def _ensure_index(self) -> dict[tuple[str, str], PresetRef]:
         with self._lock:
@@ -85,6 +139,7 @@ class ProfileStore:
             for root in [self._datadir / "system", *self._extra_system_dirs]:
                 self._scan_tree(root, "system", index)
             self._index = index
+            self._selections = self._load_selections()
             self._scanned_at = time.monotonic()
             return index
 
@@ -92,13 +147,58 @@ class ProfileStore:
         with self._lock:
             self._scanned_at = 0.0
 
+    @staticmethod
+    def _inherited(index: dict[tuple[str, str], PresetRef], ref: PresetRef | None, attr: str) -> Any:
+        for _ in range(MAX_INHERIT_DEPTH):
+            if ref is None:
+                return None
+            if value := getattr(ref, attr):
+                return value
+            ref = index.get((ref.kind, ref.inherits)) if ref.inherits else None
+        return None
+
+    def _enabled_printers(self, index: dict[tuple[str, str], PresetRef], sel: Selections) -> set[str]:
+        """System printer names that are enabled, or that a user printer is based on."""
+        names: set[str] = set()
+        for (kind, _), ref in index.items():
+            if kind != "printer" or not ref.visible:
+                continue
+            if ref.source == "system":
+                model = self._inherited(index, ref, "printer_model")
+                variant = self._inherited(index, ref, "printer_variant")
+                if (model, variant) in sel.printers:
+                    names.add(ref.name)
+                continue
+            parent = index.get(("printer", ref.inherits)) if ref.inherits else None
+            for _ in range(MAX_INHERIT_DEPTH):
+                if parent is None or parent.source == "system":
+                    break
+                parent = index.get(("printer", parent.inherits)) if parent.inherits else None
+            if parent is not None:
+                names.add(parent.name)
+        return names
+
     def list(self, kind: str, include_system: bool = False) -> list[dict[str, Any]]:
         if kind not in KIND_DIRS:
             raise ProfileError("Unknown profile kind")
+        index = self._ensure_index()
+        sel = self._selections
+        printers = self._enabled_printers(index, sel) if include_system and sel else set()
+
+        def system_enabled(ref: PresetRef) -> bool:
+            if sel is None:
+                return True
+            if kind == "printer":
+                return ref.name in printers
+            if kind == "filament":
+                return ref.name in sel.filaments
+            compat = self._inherited(index, ref, "compatible_printers")
+            return not compat or any(p in printers for p in compat)
+
         refs = [
             r
-            for (k, _), r in self._ensure_index().items()
-            if k == kind and r.visible and (include_system or r.source == "user")
+            for (k, _), r in index.items()
+            if k == kind and r.visible and (r.source == "user" or (include_system and system_enabled(r)))
         ]
         return [
             {"name": r.name, "kind": r.kind, "source": r.source, "inherits": r.inherits}

@@ -4,6 +4,16 @@ import { api, Model, Preset } from "../api";
 
 type Kind = "printer" | "process" | "filament";
 
+// Orca's curr_bed_type values and the labels Orca shows for them.
+const BED_TYPES: [string, string][] = [
+  ["Textured PEI Plate", "Textured PEI Plate"],
+  ["High Temp Plate", "Smooth High Temp Plate"],
+  ["Engineering Plate", "Engineering Plate"],
+  ["Cool Plate", "Smooth Cool Plate"],
+  ["Textured Cool Plate", "Textured Cool Plate"],
+  ["Supertack Plate", "Cool Plate (SuperTack)"],
+];
+
 export default function SlicePage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -17,6 +27,7 @@ export default function SlicePage() {
     JSON.parse(localStorage.getItem("slice.filaments") ?? '[""]'),
   );
   const [layerHeight, setLayerHeight] = useState("");
+  const [bedType, setBedType] = useState(() => localStorage.getItem("slice.bedType") ?? "Textured PEI Plate");
   const [infill, setInfill] = useState("");
   const [supports, setSupports] = useState<"" | "true" | "false">("");
   const [arrange, setArrange] = useState(true);
@@ -49,7 +60,7 @@ export default function SlicePage() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const overrides: Record<string, string> = {};
+    const overrides: Record<string, string> = { curr_bed_type: bedType };
     if (layerHeight) overrides.layer_height = layerHeight;
     if (infill) overrides.sparse_infill_density = `${infill}%`;
     if (supports) overrides.enable_support = supports;
@@ -57,6 +68,7 @@ export default function SlicePage() {
     localStorage.setItem("slice.printer", printer);
     localStorage.setItem("slice.process", process);
     localStorage.setItem("slice.filaments", JSON.stringify(filaments));
+    localStorage.setItem("slice.bedType", bedType);
     setBusy(true);
     try {
       const job = await api<{ id: string }>("/api/jobs", {
@@ -103,7 +115,7 @@ export default function SlicePage() {
         )}
         <label className="row check">
           <input type="checkbox" checked={includeSystem} onChange={(e) => setIncludeSystem(e.target.checked)} />
-          Show system presets
+          Show system presets enabled in Orca
         </label>
         <label>
           Printer
@@ -145,6 +157,16 @@ export default function SlicePage() {
             + Add filament
           </button>
         )}
+        <label>
+          Plate type
+          <select value={bedType} onChange={(e) => setBedType(e.target.value)}>
+            {BED_TYPES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
       </fieldset>
 
       <fieldset className="card stack">

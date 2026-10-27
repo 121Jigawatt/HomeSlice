@@ -112,3 +112,20 @@ def test_job_fails_cleanly_without_orca(authed, settings):
     bad = authed.post("/api/jobs", json={"model_ids": [model["id"]], "printer": "P", "process": "Q", "filaments": ["F"], "overrides": {"post_process": "x"}})
     assert bad.status_code == 400
     assert authed.get(f"/api/jobs/{job_id}/files/..%2F..%2Fconfig").status_code == 404
+
+
+def test_rejects_plate_without_bed_temperature(authed, settings):
+    d = settings.orca_datadir / "user/default"
+    for kind, name in (("machine", "P"), ("process", "Q")):
+        (d / kind).mkdir(parents=True, exist_ok=True)
+        (d / kind / f"{name}.json").write_text(json.dumps({"name": name}))
+    (d / "filament").mkdir(parents=True, exist_ok=True)
+    (d / "filament" / "PETG.json").write_text(
+        json.dumps({"name": "PETG", "cool_plate_temp_initial_layer": ["0"], "textured_plate_temp_initial_layer": ["70"]})
+    )
+    model = authed.post("/api/library", params={"filename": "m.stl"}, content=binary_stl()).json()
+    body = {"model_ids": [model["id"]], "printer": "P", "process": "Q", "filaments": ["PETG"]}
+    r = authed.post("/api/jobs", json={**body, "overrides": {"curr_bed_type": "Cool Plate"}})
+    assert r.status_code == 400 and "Cool Plate" in r.json()["detail"]
+    r = authed.post("/api/jobs", json={**body, "overrides": {"curr_bed_type": "Textured PEI Plate"}})
+    assert r.status_code == 202, r.text
