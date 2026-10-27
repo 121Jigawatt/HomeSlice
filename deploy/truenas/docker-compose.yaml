@@ -1,5 +1,5 @@
 # HomeSlice for TrueNAS SCALE: Apps > Discover Apps > (⋮) Install via YAML.
-# Create the datasets first and replace /mnt/tank/apps/homeslice with your pool path.
+# Storage uses named volumes, which TrueNAS keeps in the apps pool's ix-apps dataset (no datasets to create).
 services:
   homeslice:
     image: ghcr.io/121jigawatt/homeslice:latest
@@ -14,8 +14,8 @@ services:
       HOMESLICE_MAX_UPLOAD_MB: "500"
       HOMESLICE_SLICE_WORKERS: "1"
     volumes:
-      - /mnt/tank/apps/homeslice/config:/config
-      - /mnt/tank/apps/homeslice/data:/data
+      - homeslice-config:/config
+      - homeslice-data:/data
     ports:
       # Only the authenticated proxy is published (HTTPS, self-signed). Never publish 3000/3001 (raw desktop stream).
       - "8443:8443"
@@ -36,3 +36,7 @@ services:
         limits:
           cpus: "4"
           memory: 8G
+
+volumes:
+  homeslice-config:
+  homeslice-data:
