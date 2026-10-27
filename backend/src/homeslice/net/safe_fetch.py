@@ -97,16 +97,26 @@ class SafeFetcher:
             headers={"User-Agent": "HomeSlice/0.1"},
         )
 
-    async def _open(self, client: httpx.AsyncClient, url: str, headers: dict[str, str] | None) -> httpx.Response:
+    async def _open(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        headers: dict[str, str] | None,
+        json_body: Any = None,
+    ) -> httpx.Response:
+        method = "GET" if json_body is None else "POST"
         for _ in range(self._max_redirects + 1):
             host = self.check_url(url)
             await self._check_dns(host)
-            request = client.build_request("GET", url, headers=headers)
+            request = client.build_request(method, url, headers=headers, json=json_body)
             response = await client.send(request, stream=True)
             self._check_peer(response)
             if response.is_redirect:
-                location = response.headers.get("location", "")
                 await response.aclose()
+                # Replaying a POST to another location is never what we want.
+                if method != "GET":
+                    raise FetchError(f"Unexpected redirect from {host}")
+                location = response.headers.get("location", "")
                 url = urljoin(url, location)
                 # Auth headers must never follow a redirect to another host.
                 if headers and urlsplit(url).hostname != host:
@@ -123,8 +133,14 @@ class SafeFetcher:
         raise FetchError("Too many redirects")
 
     async def get_json(self, url: str, headers: dict[str, str] | None = None) -> Any:
+        return await self._read_json(url, headers, None)
+
+    async def post_json(self, url: str, payload: Any, headers: dict[str, str] | None = None) -> Any:
+        return await self._read_json(url, headers, payload)
+
+    async def _read_json(self, url: str, headers: dict[str, str] | None, payload: Any) -> Any:
         async with self._client() as client:
-            response = await self._open(client, url, headers)
+            response = await self._open(client, url, headers, payload)
             try:
                 body = bytearray()
                 async for chunk in response.aiter_bytes():

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, AuthStatus, setCsrfToken } from "./api";
 import { LoginPage, SetupPage } from "./pages/Auth";
 import LibraryPage from "./pages/Library";
@@ -8,6 +8,7 @@ import { JobPage, JobsPage } from "./pages/Jobs";
 import SettingsPage from "./pages/Settings";
 
 export default function App() {
+  const location = useLocation();
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,14 +34,15 @@ export default function App() {
   if (!status) return <div className="center muted">Loading…</div>;
   if (status.setup_required) return <SetupPage onDone={refresh} />;
   if (!status.authenticated) return <LoginPage onDone={refresh} />;
+  if (location.pathname === "/orca") return <FullOrca />;
 
   return (
     <div className="app">
       <header className="topbar">
         <span className="brand">HomeSlice</span>
-        <a className="button small secondary" href="/gui/">
+        <Link className="button small secondary" to="/orca">
           Full Orca
-        </a>
+        </Link>
       </header>
       <main className="content">
         <Routes>
@@ -60,6 +62,28 @@ export default function App() {
         <NavLink to="/jobs">Jobs</NavLink>
         <NavLink to="/settings">Settings</NavLink>
       </nav>
+    </div>
+  );
+}
+
+function FullOrca() {
+  return (
+    <div className="orca-page">
+      <header className="orca-bar">
+        <Link className="button small secondary" to="/library">
+          ← HomeSlice
+        </Link>
+        <span className="muted small">OrcaSlicer</span>
+        <a className="button small secondary" href="/gui/" target="_blank" rel="noopener">
+          New tab
+        </a>
+      </header>
+      <iframe
+        className="orca-frame"
+        src="/gui/"
+        title="OrcaSlicer"
+        allow="clipboard-read; clipboard-write; fullscreen; autoplay"
+      />
     </div>
   );
 }

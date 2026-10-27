@@ -122,6 +122,27 @@ export interface PrinterStatus {
   address: string | null;
 }
 
+export interface ImportFile {
+  id: string;
+  name: string;
+  size: number | null;
+  preview: string | null;
+  importable: boolean;
+}
+
+export interface ImportPreview {
+  source: "printables" | "makerworld";
+  id: string;
+  url: string;
+  title: string;
+  author: string | null;
+  license: string | null;
+  images: string[];
+  files: ImportFile[];
+  downloadable: boolean;
+  note: string | null;
+}
+
 export interface ReleaseInfo {
   tag: string;
   name: string;

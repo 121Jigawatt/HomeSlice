@@ -77,6 +77,22 @@ button.small, .button.small { font-size: 0.85rem; }
 .badge.running, .badge.queued { background: #1e3a8a; color: #bfdbfe; }
 
 progress { width: 100%; }
+
+.preview-main { width: 100%; max-height: 50vh; object-fit: contain; border-radius: 8px; background: var(--bg); }
+.thumbs { flex-wrap: nowrap; overflow-x: auto; }
+.thumb { padding: 0; background: none; border: 2px solid transparent; border-radius: 6px; flex: 0 0 auto; }
+.thumb.active { border-color: var(--accent); }
+.thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; display: block; }
+.file-row { align-items: center; }
+.file-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; background: var(--bg); flex: 0 0 auto; }
+
+.orca-page { height: 100dvh; display: flex; flex-direction: column; }
+.orca-bar {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+  padding: calc(env(safe-area-inset-top) + 0.4rem) 0.75rem 0.4rem;
+  background: var(--card); border-bottom: 1px solid var(--border);
+}
+.orca-frame { flex: 1; width: 100%; border: 0; background: #000; }
 .log {
   background: #050a14; border: 1px solid var(--border); border-radius: 8px;
   padding: 0.7rem; max-height: 50vh; overflow: auto; font-size: 0.75rem; white-space: pre-wrap;

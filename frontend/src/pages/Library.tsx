@@ -1,6 +1,6 @@
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, formatBytes, Model, uploadModel } from "../api";
+import { api, formatBytes, ImportPreview, Model, uploadModel } from "../api";
 
 export default function LibraryPage() {
   const [models, setModels] = useState<Model[]>([]);
@@ -49,6 +49,7 @@ export default function LibraryPage() {
           <progress max={100} value={uploading.pct} />
         </div>
       )}
+      <ImportFromLink onImported={load} />
       {error && <p className="error">{error}</p>}
       {models.length === 0 && <p className="muted">No models yet. Upload an STL, 3MF, OBJ or STEP file.</p>}
       <ul className="list">
@@ -75,5 +76,150 @@ export default function LibraryPage() {
         ))}
       </ul>
     </section>
+  );
+}
+
+function ImportFromLink({ onImported }: { onImported: () => void }) {
+  const [url, setUrl] = useState("");
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [image, setImage] = useState(0);
+  const [busy, setBusy] = useState<"lookup" | "import" | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function lookup(e: FormEvent) {
+    e.preventDefault();
+    setBusy("lookup");
+    setMsg(null);
+    setPreview(null);
+    try {
+      const p = await api<ImportPreview>("/api/import/preview", { method: "POST", json: { url } });
+      setPreview(p);
+      setImage(0);
+      setSelected(new Set(p.files.filter((f) => f.importable).map((f) => f.id)));
+    } catch (err) {
+      setMsg({ ok: false, text: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function importSelected() {
+    if (!preview) return;
+    setBusy("import");
+    setMsg(null);
+    try {
+      const records = await api<Model[]>("/api/import", {
+        method: "POST",
+        json: { source: preview.source, model_id: preview.id, file_ids: [...selected] },
+      });
+      setMsg({ ok: true, text: `Added ${records.length} file${records.length === 1 ? "" : "s"} to the library.` });
+      setPreview(null);
+      setUrl("");
+      onImported();
+    } catch (err) {
+      setMsg({ ok: false, text: (err as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function toggle(id: string) {
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelected(next);
+  }
+
+  return (
+    <div className="card stack">
+      <strong>Import from link</strong>
+      <form className="row" onSubmit={lookup}>
+        <input
+          className="grow"
+          type="url"
+          inputMode="url"
+          placeholder="Paste a Printables or MakerWorld link"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          required
+        />
+        <button className="small" disabled={busy !== null}>
+          {busy === "lookup" ? "Loading…" : "Look up"}
+        </button>
+      </form>
+      {msg && <p className={msg.ok ? "muted" : "error"}>{msg.text}</p>}
+      {preview && (
+        <div className="stack">
+          {preview.images.length > 0 && (
+            <div className="stack">
+              <img className="preview-main" src={preview.images[image]} alt={preview.title} referrerPolicy="no-referrer" />
+              {preview.images.length > 1 && (
+                <div className="row thumbs">
+                  {preview.images.map((src, i) => (
+                    <button
+                      key={src}
+                      type="button"
+                      className={`thumb${i === image ? " active" : ""}`}
+                      onClick={() => setImage(i)}
+                      aria-label={`Picture ${i + 1}`}
+                    >
+                      <img src={src} alt="" referrerPolicy="no-referrer" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <div>
+            <div className="title">{preview.title}</div>
+            <div className="muted small">
+              {preview.source === "printables" ? "Printables" : "MakerWorld"}
+              {preview.author && ` · by ${preview.author}`}
+              {preview.license && ` · ${preview.license}`} ·{" "}
+              <a href={preview.url} target="_blank" rel="noopener noreferrer">
+                Open on site
+              </a>
+            </div>
+          </div>
+          {preview.note && <p className="muted small">{preview.note}</p>}
+          <ul className="list">
+            {preview.files.map((f) => (
+              <li key={f.id}>
+                <label className="row check file-row">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(f.id)}
+                    disabled={!preview.downloadable || !f.importable}
+                    onChange={() => toggle(f.id)}
+                  />
+                  {f.preview ? (
+                    <img className="file-thumb" src={f.preview} alt="" referrerPolicy="no-referrer" loading="lazy" />
+                  ) : (
+                    <span className="file-thumb" />
+                  )}
+                  <span className="grow">
+                    <span className="title">{f.name}</span>
+                    <span className="muted small">
+                      {" "}
+                      {f.size != null && formatBytes(f.size)}
+                      {!f.importable && " · not a printable model file"}
+                    </span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          {preview.downloadable ? (
+            <button disabled={busy !== null || selected.size === 0} onClick={importSelected}>
+              {busy === "import" ? "Importing…" : `Add ${selected.size} file${selected.size === 1 ? "" : "s"} to library`}
+            </button>
+          ) : (
+            <a className="button secondary" href={preview.url} target="_blank" rel="noopener noreferrer">
+              Open on MakerWorld
+            </a>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
