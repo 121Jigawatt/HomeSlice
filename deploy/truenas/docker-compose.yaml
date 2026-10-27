@@ -9,16 +9,16 @@ services:
       PUID: "568"
       PGID: "568"
       TZ: "Etc/UTC"
-      # Keep "true" when served over HTTPS (e.g. `tailscale serve`). "false" only for plain-HTTP LAN testing.
-      HOMESLICE_COOKIE_SECURE: "false"
+      # "true" because the app is served over HTTPS (port 8443 below, or `tailscale serve`).
+      HOMESLICE_COOKIE_SECURE: "true"
       HOMESLICE_MAX_UPLOAD_MB: "500"
       HOMESLICE_SLICE_WORKERS: "1"
     volumes:
       - /mnt/tank/apps/homeslice/config:/config
       - /mnt/tank/apps/homeslice/data:/data
     ports:
-      # Only the authenticated proxy is published. Never publish 3000/3001 (raw desktop stream).
-      - "8080:8080"
+      # Only the authenticated proxy is published (HTTPS, self-signed). Never publish 3000/3001 (raw desktop stream).
+      - "8443:8443"
     shm_size: "1gb"
     security_opt:
       - no-new-privileges:true

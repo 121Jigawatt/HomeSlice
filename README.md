@@ -9,7 +9,7 @@ HomeSlice is an independent project, not affiliated with OrcaSlicer. It **does n
 | Path | What | Notes |
 |---|---|---|
 | `/` | Web app (React PWA) | Library, slicing with your presets, jobs, updates |
-| `/gui/` | Full OrcaSlicer desktop (KasmVNC) | Requires a HomeSlice login (nginx `auth_request`) |
+| `/gui/` | Full OrcaSlicer desktop (Selkies) | Requires a HomeSlice login (nginx `auth_request`) |
 | `/api/*` | FastAPI backend | Runs the OrcaSlicer CLI in a sandboxed job queue |
 
 Volumes: `/config` holds OrcaSlicer presets, the database, the secret key and the setup token. `/data` holds the model library, job output and installed OrcaSlicer builds.
@@ -19,13 +19,13 @@ Volumes: `/config` holds OrcaSlicer presets, the database, the secret key and th
 1. Push this repo to GitHub. The CI workflow builds `ghcr.io/<you>/homeslice`. Make the package public, or add GHCR credentials in TrueNAS.
 2. Create datasets such as `tank/apps/homeslice/config` and `tank/apps/homeslice/data`.
 3. Go to **Apps → Discover Apps → ⋮ → Install via YAML** and paste [deploy/truenas/docker-compose.yaml](deploy/truenas/docker-compose.yaml) after editing the image name and paths.
-4. Open the app logs and copy the **setup token** line. Then browse to `http://<nas>:8080` and create your admin account.
+4. Open the app logs and copy the **setup token** line. Then browse to `https://<nas>:8443`, accept the self-signed certificate warning, and create your admin account.
 5. Go to **Settings → Check for updates → Install** to download OrcaSlicer.
 6. Open **Full Orca** once to import or create your printer, filament and process presets. They then appear on the **Slice** page.
 
 ### Remote access (phone away from home)
 
-Use Tailscale or WireGuard; **don't** port-forward. With Tailscale on the NAS, run `tailscale serve --bg 8080`, then set `HOMESLICE_COOKIE_SECURE: "true"` and use the `https://<nas>.<tailnet>.ts.net` URL.
+Use Tailscale or WireGuard; **don't** port-forward. With Tailscale on the NAS, run `tailscale serve --bg https+insecure://localhost:8443` and use the `https://<nas>.<tailnet>.ts.net` URL.
 
 ## Security model
 
@@ -44,7 +44,7 @@ Use Tailscale or WireGuard; **don't** port-forward. With Tailscale on the NAS, r
   - memory limit and timeout
 - Updates are only installed when the download matches GitHub's published SHA-256. Older versions are kept for rollback.
 - All outbound HTTP for untrusted URLs goes through `SafeFetcher`: https only, host allowlist, public IPs only, re-checked on every redirect, size cap.
-- Only port 8080 (nginx) is published. The raw desktop stream (3000/3001) and the API (8000) aren't reachable from outside the container.
+- Only port 8443 (nginx, HTTPS) is published. The raw desktop stream (3000/3001) and the API (8000) aren't reachable from outside the container.
 
 ## Development
 
