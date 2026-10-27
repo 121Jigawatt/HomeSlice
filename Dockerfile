@@ -23,12 +23,14 @@ ENV TITLE="OrcaSlicer" \
     PYTHONUNBUFFERED=1
 
 # Runtime libraries needed by the OrcaSlicer AppImage (GUI and CLI).
+# Firefox: Orca's cloud/Google sign-in opens a browser and redirects back to localhost.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         python3 python3-venv ca-certificates locales fonts-dejavu-core \
         libgtk-3-0t64 libwebkit2gtk-4.1-0 libgl1 libegl1 libglu1-mesa libosmesa6 \
         libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
         libsecret-1-0 libnotify4 \
+        firefox-esr xdg-utils \
     && apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
     && rm -f /etc/ssl/private/ssl-cert-snakeoil.key \
     && rm -rf /var/lib/apt/lists/*
