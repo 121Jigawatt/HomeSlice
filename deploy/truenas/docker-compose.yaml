@@ -1,0 +1,38 @@
+# OrcaServer for TrueNAS SCALE: Apps > Discover Apps > (⋮) Install via YAML.
+# Create the datasets first and replace /mnt/tank/apps/orcaserver with your pool path.
+services:
+  orcaserver:
+    image: ghcr.io/121jigawatt/orcaserver:latest
+    container_name: orcaserver
+    restart: unless-stopped
+    environment:
+      PUID: "568"
+      PGID: "568"
+      TZ: "Etc/UTC"
+      # Keep "true" when served over HTTPS (e.g. `tailscale serve`). "false" only for plain-HTTP LAN testing.
+      ORCASERVER_COOKIE_SECURE: "false"
+      ORCASERVER_MAX_UPLOAD_MB: "500"
+      ORCASERVER_SLICE_WORKERS: "1"
+    volumes:
+      - /mnt/tank/apps/orcaserver/config:/config
+      - /mnt/tank/apps/orcaserver/data:/data
+    ports:
+      # Only the authenticated proxy is published. Never publish 3000/3001 (raw desktop stream).
+      - "8080:8080"
+    shm_size: "1gb"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+      - KILL
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G

@@ -1,0 +1,7 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+mkdir -p /config/orcaserver /config/.config/OrcaSlicer /data/library /data/jobs /data/tmp /data/orca
+lsiown abc:abc /config/orcaserver /config/.config /config/.config/OrcaSlicer \
+    /data /data/library /data/jobs /data/tmp /data/orca
+chmod 700 /config/orcaserver

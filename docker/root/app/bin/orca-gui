@@ -1,0 +1,16 @@
+#!/bin/bash
+# Launches the active OrcaSlicer build in the KasmVNC desktop; relaunches after exit or version switch.
+
+ORCA_DIR=/data/orca
+DATADIR=/config/.config/OrcaSlicer
+export WEBKIT_DISABLE_COMPOSITING_MODE=1
+
+while true; do
+    cur=$(cat "$ORCA_DIR/current.txt" 2>/dev/null)
+    if [[ "$cur" =~ ^[A-Za-z0-9._-]+$ ]] && [ -x "$ORCA_DIR/versions/$cur/AppRun" ]; then
+        "$ORCA_DIR/versions/$cur/AppRun" --datadir "$DATADIR"
+        sleep 2
+    else
+        sleep 10
+    fi
+done
