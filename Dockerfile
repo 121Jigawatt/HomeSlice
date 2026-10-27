@@ -37,7 +37,9 @@ RUN apt-get update \
 
 COPY backend/pyproject.toml /app/backend/pyproject.toml
 COPY backend/src /app/backend/src
-RUN python3 -m venv /app/venv && /app/venv/bin/pip install --no-cache-dir /app/backend
+# /config is a volume; anything left there at build time is copied into new volumes as root.
+RUN python3 -m venv /app/venv && /app/venv/bin/pip install --no-cache-dir /app/backend \
+    && rm -rf /config/.cache
 
 COPY --from=frontend /src/dist /app/frontend
 COPY docker/root/ /

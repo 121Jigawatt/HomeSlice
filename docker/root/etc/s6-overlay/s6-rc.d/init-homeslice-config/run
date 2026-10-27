@@ -5,3 +5,7 @@ mkdir -p /config/homeslice /config/.config/OrcaSlicer /data/library /data/jobs /
 lsiown abc:abc /config/homeslice /config/.config /config/.config/OrcaSlicer \
     /data /data/library /data/jobs /data/tmp /data/orca
 chmod 700 /config/homeslice
+
+# Older images left a root-owned cache here, which breaks Firefox (Orca sign-in).
+mkdir -p /config/.cache
+lsiown -R abc:abc /config/.cache
