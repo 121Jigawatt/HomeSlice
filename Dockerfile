@@ -12,7 +12,6 @@ FROM ghcr.io/linuxserver/baseimage-selkies:debiantrixie
 # CUSTOM_WS_PORT: Selkies defaults to 8080, which the HomeSlice proxy owns.
 ENV TITLE="OrcaSlicer" \
     SUBFOLDER="/gui/" \
-    NO_DECOR="true" \
     START_DOCKER="false" \
     CUSTOM_WS_PORT="8082" \
     HOMESLICE_CONFIG_DIR=/config/homeslice \
@@ -44,6 +43,12 @@ RUN python3 -m venv /app/venv && /app/venv/bin/pip install --no-cache-dir /app/b
 COPY --from=frontend /src/dist /app/frontend
 COPY docker/root/ /
 RUN chmod 0755 /app/bin/* /etc/s6-overlay/s6-rc.d/*/run
+
+# The base's catch-all openbox rule maximizes every window (and NO_DECOR strips all title bars),
+# which leaves Orca's dialogs fullscreen with no close button. Apply it to main windows only.
+RUN grep -q '<application class="\*">' /etc/xdg/openbox/rc.xml \
+    && sed -i 's|<application class="\*">|<application class="*" type="normal"><decor>no</decor>|' /etc/xdg/openbox/rc.xml \
+    && grep -q 'type="normal"><decor>no</decor>' /etc/xdg/openbox/rc.xml
 
 EXPOSE 8080 8443
 VOLUME ["/config", "/data"]
