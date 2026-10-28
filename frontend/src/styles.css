@@ -193,6 +193,26 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .orca-frame { flex: 1; width: 100%; border: 0; background: #000; }
 
 .import-go { align-self: flex-end; }
+.getting-started { border-color: #0f766e; }
+.setup-step { flex-wrap: nowrap; align-items: flex-start; }
+.setup-step.done .title { color: var(--muted); font-weight: 500; }
+.setup-check {
+  flex: 0 0 1.5rem; height: 1.5rem; margin-top: 0.1rem; border-radius: 999px; border: 2px solid var(--border);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.setup-step.done .setup-check { background: var(--accent); border-color: var(--accent); color: #042f2e; }
+.setup-dismiss { align-self: flex-start; }
+.drop-target { position: relative; }
+.drop-overlay {
+  position: fixed; inset: 0; z-index: 30; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem;
+  background: rgba(11, 18, 32, 0.85); border: 3px dashed var(--accent); color: var(--accent); font-size: 1.2rem; font-weight: 600;
+}
+.sort-label { flex-direction: row; align-items: center; gap: 0.5rem; }
+.sort-label select { width: auto; }
+.empty h2 { margin: 0; }
+.empty .muted { max-width: 34rem; }
+.upload-row progress { height: 6px; }
 .bed-flag {
   display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
   padding: 0.5rem 0.6rem; border-radius: 8px; border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.1); color: #fde68a;

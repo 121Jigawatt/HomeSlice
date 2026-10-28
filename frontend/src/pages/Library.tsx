@@ -1,14 +1,40 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, formatBytes, ImportPreview, Model, uploadModel } from "../api";
+import { Icon } from "../icons";
 import { ModelThumb } from "../ModelThumb";
 import { PrinterStrip } from "../printers";
+import { GettingStarted } from "../setup";
+import { useToast } from "../toast";
 import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
 
+const ACCEPT = [".stl", ".3mf", ".obj", ".step", ".stp", ".amf"];
+type Upload = { key: string; name: string; pct: number; state: "waiting" | "uploading" | "done" | "error"; error?: string };
+type Sort = "newest" | "oldest" | "name" | "size";
+const SORTS: [Sort, string][] = [
+  ["newest", "Newest first"],
+  ["oldest", "Oldest first"],
+  ["name", "Name (A–Z)"],
+  ["size", "Largest first"],
+];
+
+function sortModels(models: Model[], sort: Sort): Model[] {
+  const out = [...models];
+  if (sort === "newest") out.sort((a, b) => b.created_at - a.created_at);
+  if (sort === "oldest") out.sort((a, b) => a.created_at - b.created_at);
+  if (sort === "name") out.sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: "base" }));
+  if (sort === "size") out.sort((a, b) => b.size - a.size);
+  return out;
+}
+
 export default function LibraryPage() {
-  const [models, setModels] = useState<Model[]>([]);
+  const [models, setModels] = useState<Model[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState<{ name: string; pct: number } | null>(null);
+  const [uploads, setUploads] = useState<Upload[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [sort, setSort] = useState<Sort>(() => (localStorage.getItem("library.sort") as Sort) || "newest");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const notify = useToast();
 
   const load = () => api<Model[]>("/api/library").then(setModels).catch((e) => setError(e.message));
   useEffect(() => {
@@ -16,7 +42,7 @@ export default function LibraryPage() {
   }, []);
 
   // Thumbnails render in the background; refresh while recent previewable uploads still lack one.
-  const pendingThumbs = models.some(
+  const pendingThumbs = (models ?? []).some(
     (m) => !m.has_thumbnail && [".stl", ".3mf", ".obj"].includes(m.ext) && Date.now() / 1000 - m.created_at < 600,
   );
   useEffect(() => {
@@ -25,21 +51,58 @@ export default function LibraryPage() {
     return () => window.clearTimeout(t);
   }, [models, pendingThumbs]);
 
-  async function onFiles(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
+  const busy = uploads.some((u) => u.state === "waiting" || u.state === "uploading");
+
+  async function uploadFiles(files: File[]) {
     setError(null);
-    for (const file of files) {
-      setUploading({ name: file.name, pct: 0 });
+    const ok = files.filter((f) => ACCEPT.some((ext) => f.name.toLowerCase().endsWith(ext)));
+    const skipped = files.length - ok.length;
+    if (skipped) notify(`Skipped ${skipped} file${skipped === 1 ? "" : "s"}: only STL, 3MF, OBJ, STEP and AMF can be added.`, { tone: "error" });
+    if (!ok.length) return;
+    const batch: Upload[] = ok.map((f, i) => ({ key: `${Date.now()}-${i}-${f.name}`, name: f.name, pct: 0, state: "waiting" }));
+    setUploads((u) => [...u.filter((x) => x.state !== "done"), ...batch]);
+    const update = (key: string, patch: Partial<Upload>) =>
+      setUploads((u) => u.map((x) => (x.key === key ? { ...x, ...patch } : x)));
+    let done = 0;
+    for (let i = 0; i < ok.length; i++) {
+      const { key } = batch[i];
+      update(key, { state: "uploading" });
       try {
-        await uploadModel(file, (pct) => setUploading({ name: file.name, pct }));
+        await uploadModel(ok[i], (pct) => update(key, { pct }));
+        update(key, { state: "done", pct: 100 });
+        done++;
+        load();
       } catch (err) {
-        setError(`${file.name}: ${(err as Error).message}`);
+        update(key, { state: "error", error: (err as Error).message });
       }
     }
-    setUploading(null);
-    load();
+    if (done) notify(`Added ${done} model${done === 1 ? "" : "s"} to the library.`, { tone: "success" });
+    // Finished rows clear after a moment; failures stay until dismissed.
+    window.setTimeout(() => setUploads((u) => u.filter((x) => x.state !== "done")), 4000);
   }
+
+  function onFiles(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    uploadFiles(files);
+  }
+
+  const dropHandlers = {
+    onDragOver: (e: DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      setDragging(true);
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+    },
+    onDrop: (e: DragEvent) => {
+      if (!e.dataTransfer.files.length) return;
+      e.preventDefault();
+      setDragging(false);
+      uploadFiles(Array.from(e.dataTransfer.files));
+    },
+  };
 
   const confirm = useConfirm();
   const undoableDelete = useUndoableDelete();
@@ -53,33 +116,111 @@ export default function LibraryPage() {
     if (!ok) return;
     undoableDelete(
       m.filename,
-      () => setModels((ms) => ms.filter((x) => x.id !== m.id)),
+      () => setModels((ms) => (ms ?? []).filter((x) => x.id !== m.id)),
       load,
       () => api(`/api/library/${m.id}`, { method: "DELETE" }).then(load),
     );
   }
 
+  const sorted = sortModels(models ?? [], sort);
+
   return (
-    <section className="stack">
+    <section className={`stack drop-target${dragging ? " dragging" : ""}`} {...dropHandlers}>
       <div className="row between">
         <h1>Library</h1>
-        <label className="button">
-          Upload
-          <input type="file" accept=".stl,.3mf,.obj,.step,.stp,.amf" multiple hidden onChange={onFiles} />
-        </label>
+        <button type="button" onClick={() => fileInput.current?.click()} disabled={busy}>
+          <Icon name="upload" size={18} /> Upload
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept={ACCEPT.join(",")}
+          multiple
+          hidden
+          onChange={onFiles}
+          aria-label="Choose model files to upload"
+        />
       </div>
       <PrinterStrip />
-      {uploading && (
-        <div className="card">
-          Uploading {uploading.name}… {uploading.pct}%
-          <progress max={100} value={uploading.pct} />
+      <GettingStarted modelCount={models ? models.length : null} />
+      {dragging && (
+        <div className="drop-overlay" aria-hidden="true">
+          <Icon name="upload" size={32} />
+          Drop to add to the library
+        </div>
+      )}
+      {uploads.length > 0 && (
+        <div className="card stack" aria-live="polite">
+          <h2>Uploads</h2>
+          <ul className="list">
+            {uploads.map((u) => (
+              <li key={u.key} className="stack upload-row">
+                <div className="row between small">
+                  <span className="title grow">{u.name}</span>
+                  <span className={u.state === "error" ? "error" : "muted"}>
+                    {u.state === "waiting" ? "Waiting" : u.state === "uploading" ? `${u.pct}%` : u.state === "done" ? "Added" : "Failed"}
+                  </span>
+                  {u.state === "error" && (
+                    <button
+                      type="button"
+                      className="icon-button secondary"
+                      aria-label={`Dismiss ${u.name}`}
+                      onClick={() => setUploads((x) => x.filter((y) => y.key !== u.key))}
+                    >
+                      <Icon name="close" size={14} />
+                    </button>
+                  )}
+                </div>
+                {u.state === "error" ? (
+                  <p className="error small">{u.error}</p>
+                ) : (
+                  <progress max={100} value={u.pct} aria-label={`${u.name} upload progress`} />
+                )}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       <ImportFromLink onImported={load} />
       {error && <p className="error">{error}</p>}
-      {models.length === 0 && <p className="muted">No models yet. Upload an STL, 3MF, OBJ or STEP file.</p>}
+      {models && models.length === 0 && uploads.length === 0 && (
+        <div className="card empty">
+          <Icon name="cube" size={40} />
+          <h2>Your library is empty</h2>
+          <p className="muted">
+            Add STL, 3MF, OBJ or STEP files to slice them for your printers. Drag files onto this page, choose them from
+            your device, or paste a Printables or MakerWorld link above.
+          </p>
+          <button type="button" onClick={() => fileInput.current?.click()}>
+            <Icon name="upload" size={18} /> Choose files
+          </button>
+        </div>
+      )}
+      {models && models.length > 1 && (
+        <div className="row between">
+          <span className="muted small">
+            {models.length} models · {formatBytes(models.reduce((n, m) => n + m.size, 0))}
+          </span>
+          <label className="row sort-label">
+            Sort
+            <select
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value as Sort);
+                localStorage.setItem("library.sort", e.target.value);
+              }}
+            >
+              {SORTS.map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
       <ul className="list model-grid">
-        {models.map((m) => (
+        {sorted.map((m) => (
           <li key={m.id} className="card row between">
             <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={64} />
             <div className="grow">
