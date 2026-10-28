@@ -47,6 +47,8 @@ export default function SlicePage() {
   const [models, setModels] = useState<Model[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(params.getAll("model")));
+  const [copies, setCopies] = useState<Record<string, number>>({});
+  const countOf = (id: string) => copies[id] ?? 1;
   const [includeSystem, setIncludeSystem] = useState(false);
   const [presets, setPresets] = useState<Record<Kind, Preset[]>>({ printer: [], process: [], filament: [] });
   const [presetsLoaded, setPresetsLoaded] = useState(false);
@@ -121,6 +123,7 @@ export default function SlicePage() {
         .then((job) => {
           apply(fromJob(job));
           setSelected(new Set(job.params.model_ids));
+          setCopies(Object.fromEntries(job.params.model_ids.map((id, i) => [id, job.params.copies?.[i] ?? 1])));
           setPrefillNote(`Settings copied from the job for ${job.title ?? "a previous slice"}.`);
           setPrefilled(true);
         })
@@ -181,10 +184,16 @@ export default function SlicePage() {
     [presetsLoaded, includeSystem, presets.printer.length],
   );
   const selectedModels = useMemo(() => models.filter((m) => selected.has(m.id)), [models, selected]);
+  const previewModels = useMemo(
+    () => selectedModels.flatMap((m) => Array.from({ length: copies[m.id] ?? 1 }, () => m)),
+    [selectedModels, copies],
+  );
+  const totalObjects = selectedModels.reduce((n, m) => n + countOf(m.id), 0);
   const chosenFilaments = filaments.filter(Boolean);
 
   const blockers: string[] = [];
   if (selected.size === 0) blockers.push("Select at least one model.");
+  if (totalObjects > 200) blockers.push(`At most 200 objects can be sliced at once (you have ${totalObjects}).`);
   if (!printer) blockers.push("Choose a printer preset.");
   if (target && printer !== target.printer_preset)
     blockers.push(`The printer profile must be ${target.name}'s ("${displayName(target.printer_preset ?? "")}").`);
@@ -222,6 +231,7 @@ export default function SlicePage() {
         method: "POST",
         json: {
           model_ids: [...selected],
+          copies: [...selected].map(countOf),
           printer,
           process,
           filaments: chosenFilaments,
@@ -269,10 +279,17 @@ export default function SlicePage() {
 
       <fieldset className="card stack slice-models">
         <legend>Models</legend>
-        <ModelPicker models={models} loaded={modelsLoaded} selected={selected} onToggle={toggle} />
+        <ModelPicker
+          models={models}
+          loaded={modelsLoaded}
+          selected={selected}
+          onToggle={toggle}
+          copies={copies}
+          onCopies={(id, n) => setCopies((c) => ({ ...c, [id]: n }))}
+        />
         {selected.size > 0 && (
           <Suspense fallback={<div className="viewer placeholder muted small">Loading 3D preview…</div>}>
-            <ModelViewer models={selectedModels} printerPreset={printer} />
+            <ModelViewer models={previewModels} printerPreset={printer} />
           </Suspense>
         )}
       </fieldset>
@@ -433,7 +450,11 @@ export default function SlicePage() {
         <strong id="recap-title">Summary</strong>
         <dl className="recap small">
           <dt>Models</dt>
-          <dd>{selectedModels.map((m) => m.filename).join(", ") || "—"}</dd>
+          <dd>
+            {selectedModels.map((m) => (countOf(m.id) > 1 ? `${m.filename} \u00d7${countOf(m.id)}` : m.filename)).join(", ") ||
+              "\u2014"}
+            {totalObjects > 1 && <span className="muted"> ({totalObjects} objects)</span>}
+          </dd>
           <dt>Printer</dt>
           <dd title={printer}>{printer ? displayName(printer) : "—"}</dd>
           <dt>Process</dt>

@@ -23,6 +23,7 @@ class JobBody(BaseModel):
     arrange: bool = True
     orient: bool = False
     plate: int = Field(default=0, ge=0, le=99)
+    copies: list[int] = Field(default_factory=list, max_length=50)
     # Physical printer the result is meant for; its printer profile must match `printer`.
     target_printer_id: str | None = Field(default=None, max_length=64)
 

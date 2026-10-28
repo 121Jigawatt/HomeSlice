@@ -114,6 +114,7 @@ export interface Job {
   stats: Record<string, string> | null;
   params: {
     model_ids: string[];
+    copies?: number[];
     printer: string;
     process: string;
     filaments: string[];

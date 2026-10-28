@@ -42,24 +42,38 @@ async function loadModel(m: Model): Promise<THREE.Object3D> {
   throw new Error(`${m.ext.slice(1).toUpperCase()} files can't be previewed in the browser`);
 }
 
-/** Places models side by side on the plate, resting on Z=0, centred on the bed. */
+/** Places models in rows on the plate, resting on Z=0, centred on the bed. */
 function layout(objects: THREE.Object3D[], bed: Bed): THREE.Box3 {
   const bedBox = new THREE.Box3();
   bed.area.forEach(([x, y]) => bedBox.expandByPoint(new THREE.Vector3(x, y, 0)));
   const bedCenter = bedBox.getCenter(new THREE.Vector3());
+  const bedWidth = bedBox.max.x - bedBox.min.x;
   const boxes = objects.map((o) => new THREE.Box3().setFromObject(o));
-  const total = boxes.reduce((w, b) => w + (b.max.x - b.min.x), 0) + GAP * (objects.length - 1);
-  let x = bedCenter.x - total / 2;
-  const all = new THREE.Box3();
+  // Shelf packing: start a new row when the next object would overflow the bed width.
+  let x = 0;
+  let y = 0;
+  let rowDepth = 0;
   objects.forEach((o, i) => {
     const b = boxes[i];
-    const cy = (b.min.y + b.max.y) / 2;
+    const w = b.max.x - b.min.x;
+    const d = b.max.y - b.min.y;
+    if (x > 0 && x + w > bedWidth) {
+      x = 0;
+      y += rowDepth + GAP;
+      rowDepth = 0;
+    }
     o.position.x += x - b.min.x;
-    o.position.y += bedCenter.y - cy;
+    o.position.y += -y - b.max.y;
     o.position.z += -b.min.z;
-    x += b.max.x - b.min.x + GAP;
-    all.union(new THREE.Box3().setFromObject(o));
+    x += w + GAP;
+    rowDepth = Math.max(rowDepth, d);
   });
+  const all = new THREE.Box3();
+  objects.forEach((o) => all.union(new THREE.Box3().setFromObject(o)));
+  const shift = bedCenter.clone().sub(all.getCenter(new THREE.Vector3()));
+  shift.z = 0;
+  objects.forEach((o) => o.position.add(shift));
+  all.translate(shift);
   return all;
 }
 
@@ -111,7 +125,13 @@ export default function ModelViewer({ models, printerPreset }: { models: Model[]
       viewer.frame(plateBox(bed.area, bed.height));
     } else {
       setStatus("Loading preview…");
-      Promise.allSettled(previewable.map(loadModel)).then((results) => {
+      // Copies share one download and geometry.
+      const loads = new Map<string, Promise<THREE.Object3D>>();
+      const load = (m: Model) => {
+        if (!loads.has(m.id)) loads.set(m.id, loadModel(m));
+        return loads.get(m.id)!.then((o) => o.clone());
+      };
+      Promise.allSettled(previewable.map(load)).then((results) => {
         if (cancelled) return;
         const objects = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
         const failed = results.filter((r) => r.status === "rejected").length + skipped;

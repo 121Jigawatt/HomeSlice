@@ -197,6 +197,14 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .printer-profiles { margin-top: 0.5rem; }
 .warn-inline { color: #fde68a; }
 .picked-model { flex-wrap: nowrap; }
+.quantity { display: inline-flex; align-items: center; gap: 0.25rem; flex: 0 0 auto; }
+.quantity input { width: 3.6rem; text-align: center; padding: 0.55rem 0.25rem; -moz-appearance: textfield; }
+.quantity input::-webkit-inner-spin-button, .quantity input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+@media (max-width: 420px) {
+  .picked-model { flex-wrap: wrap; }
+  .picked-model .title { flex: 1 1 calc(100% - 60px); }
+  .picked-model .quantity { margin-left: 48px; }
+}
 .picker-dialog { width: min(560px, calc(100vw - 1.5rem)); }
 .picker-list { max-height: min(55vh, 28rem); overflow-y: auto; gap: 0.25rem; }
 .picker-row { flex-wrap: nowrap; padding: 0.25rem 0.4rem; border-radius: 8px; cursor: pointer; }

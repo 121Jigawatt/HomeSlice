@@ -41,7 +41,15 @@ class JobRequest:
     arrange: bool = True
     orient: bool = False
     plate: int = 0
+    # Copies of each model, parallel to model_ids; empty means one of each.
+    copies: list[int] = field(default_factory=list)
 
+    def counts(self) -> list[int]:
+        return self.copies or [1] * len(self.model_ids)
+
+
+MAX_COPIES = 100
+MAX_OBJECTS = 200
 
 def parse_gcode_stats(path: Path) -> dict[str, str]:
     stats: dict[str, str] = {}
@@ -131,6 +139,13 @@ class JobManager:
             raise SliceArgsError("Select between 1 and 50 models")
         if not 1 <= len(req.filaments) <= 16:
             raise SliceArgsError("Select between 1 and 16 filaments")
+        if req.copies and len(req.copies) != len(req.model_ids):
+            raise SliceArgsError("Give one copy count per model")
+        counts = req.counts()
+        if any(not isinstance(c, int) or not 1 <= c <= MAX_COPIES for c in counts):
+            raise SliceArgsError(f"Copies must be between 1 and {MAX_COPIES}")
+        if sum(counts) > MAX_OBJECTS:
+            raise SliceArgsError(f"At most {MAX_OBJECTS} objects can be sliced at once")
         validate_overrides(req.overrides)
         names = []
         for mid in req.model_ids:
@@ -141,7 +156,8 @@ class JobManager:
         if bed_type := req.overrides.get("curr_bed_type"):
             self._check_bed_temps(bed_type, req.filaments)
         job_id = uuid.uuid4().hex
-        title = names[0] if len(names) == 1 else f"{names[0]} + {len(names) - 1} more"
+        labels = [f"{name} \u00d7{n}" if n > 1 else name for name, n in zip(names, counts)]
+        title = labels[0] if len(labels) == 1 else f"{labels[0]} + {len(labels) - 1} more"
         self._db.execute(
             "INSERT INTO jobs(id, params, status, stage, owner, title, created_at) VALUES(?, ?, 'queued', 'queued', ?, ?, ?)",
             (job_id, json.dumps(asdict(req)), owner, title, time.time()),
@@ -337,7 +353,9 @@ class JobManager:
                 for i, name in enumerate(req.filaments)
             ]
             size_for_filaments(process, filaments)
-            inputs = [self._library.path_for(mid) for mid in req.model_ids]
+            inputs = [
+                self._library.path_for(mid) for mid, n in zip(req.model_ids, req.counts()) for _ in range(n)
+            ]
             if any(p is None for p in inputs):
                 raise SliceArgsError("A selected model no longer exists")
             spec = SliceSpec(

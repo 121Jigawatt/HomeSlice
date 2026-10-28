@@ -3,17 +3,47 @@ import { formatBytes, Model } from "./api";
 import { Icon } from "./icons";
 import { ModelThumb } from "./ModelThumb";
 
+/** How many copies of one model to put on the plate. */
+function Quantity({ name, value, onChange }: { name: string; value: number; onChange: (n: number) => void }) {
+  const set = (n: number) => onChange(Math.min(MAX_COPIES, Math.max(1, Math.round(n) || 1)));
+  return (
+    <div className="quantity" role="group" aria-label={`Copies of ${name}`}>
+      <button type="button" className="icon-button secondary" onClick={() => set(value - 1)} disabled={value <= 1} aria-label={`One fewer ${name}`}>
+        −
+      </button>
+      <input
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={MAX_COPIES}
+        value={value}
+        onChange={(e) => set(Number(e.target.value))}
+        aria-label={`Number of copies of ${name}`}
+      />
+      <button type="button" className="icon-button secondary" onClick={() => set(value + 1)} disabled={value >= MAX_COPIES} aria-label={`One more ${name}`}>
+        +
+      </button>
+    </div>
+  );
+}
+
+const MAX_COPIES = 100;
+
 /** Selected models plus an "Add models" dialog to search the library and pick from it. */
 export function ModelPicker({
   models,
   loaded,
   selected,
   onToggle,
+  copies,
+  onCopies,
 }: {
   models: Model[];
   loaded: boolean;
   selected: Set<string>;
   onToggle: (id: string) => void;
+  copies: Record<string, number>;
+  onCopies: (id: string, n: number) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
@@ -43,6 +73,7 @@ export function ModelPicker({
             <li key={m.id} className="row picked-model">
               <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={40} />
               <span className="grow title">{m.filename}</span>
+              <Quantity name={m.filename} value={copies[m.id] ?? 1} onChange={(n) => onCopies(m.id, n)} />
               <button
                 type="button"
                 className="icon-button secondary"
