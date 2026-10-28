@@ -2,7 +2,7 @@ import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, Job, Model, Preset, Printer as PrinterConfig } from "../api";
 import { ModelPicker } from "../ModelPicker";
-import { ModelPart, planBeds, polygonArea } from "../bedPlan";
+import { ModelPart, PlateChoice, planBeds, plateRequest, polygonArea } from "../bedPlan";
 import { BED_TYPES, bedLabel, displayName } from "../presetNames";
 import { formatDuration, IDLE_STATES, PrinterBadge, useLivePrinters } from "../printers";
 import { useToast } from "../toast";
@@ -74,9 +74,10 @@ export default function SlicePage() {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(params.getAll("model")));
   const [copies, setCopies] = useState<Record<string, number>>({});
   const countOf = (id: string) => copies[id] ?? 1;
-  const [plates, setPlates] = useState<Record<string, number>>({});
+  const [plateChoices, setPlateChoices] = useState<Record<string, PlateChoice>>({});
   // Multi-plate 3MF projects default to their first plate rather than everything at once.
-  const plateOf = (m: Model) => plates[m.id] ?? (m.plates && m.plates.length > 1 ? m.plates[0].index : 0);
+  const choiceOf = (m: Model): PlateChoice | undefined =>
+    plateChoices[m.id] ?? (m.plates && m.plates.length > 1 ? { plates: [m.plates[0].index], separate: true } : undefined);
   const [includeSystem, setIncludeSystem] = useState(false);
   const [presets, setPresets] = useState<Record<Kind, Preset[]>>({ printer: [], process: [], filament: [] });
   const [presetsLoaded, setPresetsLoaded] = useState(false);
@@ -153,7 +154,15 @@ export default function SlicePage() {
           apply(fromJob(job));
           setSelected(new Set(job.params.model_ids));
           setCopies(Object.fromEntries(job.params.model_ids.map((id, i) => [id, job.params.copies?.[i] ?? 1])));
-          setPlates(Object.fromEntries(job.params.model_ids.map((id, i) => [id, job.params.model_plates?.[i] ?? 0])));
+          setPlateChoices(
+            Object.fromEntries(
+              job.params.model_ids.map((id, i) => {
+                const plate = job.params.model_plates?.[i] ?? 0;
+                const selection = job.params.plate_selection?.[i] ?? [];
+                return [id, plate > 0 ? { plates: [plate], separate: true } : { plates: selection, separate: plate < 0 }];
+              }),
+            ),
+          );
           setPrefillNote(`Settings copied from the job for ${job.title ?? "a previous slice"}.`);
           setPrefilled(true);
         })
@@ -260,12 +269,12 @@ export default function SlicePage() {
     if (!bedArea || selectedModels.some((m) => !partsByModel[m.id])) return null;
     const order = [...selected].map((id) => selectedModels.find((m) => m.id === id)).filter((m): m is Model => !!m);
     return planBeds(
-      order.map((m) => ({ model: m, copies: countOf(m.id), plate: plateOf(m), parts: partsByModel[m.id] })),
+      order.map((m) => ({ model: m, copies: countOf(m.id), ...plateRequest(m, choiceOf(m)), parts: partsByModel[m.id] })),
       coverage,
       bedArea,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedModels, selected, partsByModel, bedArea, coverage, copies, plates]);
+  }, [selectedModels, selected, partsByModel, bedArea, coverage, copies, plateChoices]);
   const bed = beds?.[Math.min(bedIndex, beds.length - 1)];
   const previewModels = useMemo(
     () => (bed ? bed.parts.map((p) => ({ ...p.model, item: p.item })) : []),
@@ -323,10 +332,13 @@ export default function SlicePage() {
         json: {
           model_ids: [...selected],
           copies: [...selected].map(countOf),
-          model_plates: [...selected].map((id) => {
-            const m = models.find((x) => x.id === id);
-            return m ? plateOf(m) : 0;
-          }),
+          ...(() => {
+            const reqs = [...selected].map((id) => {
+              const m = models.find((x) => x.id === id);
+              return m ? plateRequest(m, choiceOf(m)) : { plate: 0, selection: [] };
+            });
+            return { model_plates: reqs.map((r) => r.plate), plate_selection: reqs.map((r) => r.selection) };
+          })(),
           printer,
           process,
           filaments: chosenFilaments,
@@ -379,8 +391,8 @@ export default function SlicePage() {
           onToggle={toggle}
           copies={copies}
           onCopies={(id, n) => setCopies((c) => ({ ...c, [id]: n }))}
-          plates={plates}
-          onPlate={(id, p) => setPlates((c) => ({ ...c, [id]: p }))}
+          plateChoice={(m) => choiceOf(m)}
+          onPlateChoice={(id, c) => setPlateChoices((cur) => ({ ...cur, [id]: c }))}
         />
         {selected.size > 0 && (
           <section className="stack beds" aria-labelledby="beds-title">

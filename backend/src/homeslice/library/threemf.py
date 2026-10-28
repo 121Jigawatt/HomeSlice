@@ -8,6 +8,7 @@ build item is written out as a world-space STL, and the slicer only ever sees me
 from __future__ import annotations
 
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
@@ -47,14 +48,16 @@ def plates(source: Path) -> list[dict]:
     return sorted(out, key=lambda p: p["index"])
 
 
-def item_meshes(source: Path, plate: int = 0) -> list[np.ndarray]:
-    """World-space triangles per build item; plate > 0 keeps only that plate's objects."""
+def item_meshes(source: Path, plate: int | Iterable[int] = 0) -> list[np.ndarray]:
+    """World-space triangles per build item; plate > 0 (or a set of plates) keeps only those plates' objects."""
+    chosen = {plate} if isinstance(plate, int) else set(plate)
+    chosen.discard(0)
     wanted: set[str] | None = None
-    if plate > 0:
-        match = next((p for p in plates(source) if p["index"] == plate), None)
-        if match is None:
-            raise ThumbnailError(f"This 3MF has no plate {plate}")
-        wanted = set(match["object_ids"])
+    if chosen:
+        saved = {p["index"]: p for p in plates(source)}
+        if missing := chosen - saved.keys():
+            raise ThumbnailError(f"This 3MF has no plate {min(missing)}")
+        wanted = {oid for i in chosen for oid in saved[i]["object_ids"]}
     with zipfile.ZipFile(source) as zf:
         model = _ThreeMF(zf)
         _, items = model._read(_root_model(zf))
@@ -68,11 +71,11 @@ def item_meshes(source: Path, plate: int = 0) -> list[np.ndarray]:
             if parts:
                 meshes.append(np.concatenate(parts))
     if not meshes:
-        raise ThumbnailError("No printable objects found in this 3MF" + (f" on plate {plate}" if plate else ""))
+        raise ThumbnailError("No printable objects found in this 3MF" + (" on the chosen plates" if chosen else ""))
     return meshes
 
 
-def write_items(source: Path, dest_dir: Path, plate: int = 0) -> list[Path]:
+def write_items(source: Path, dest_dir: Path, plate: int | Iterable[int] = 0) -> list[Path]:
     """One STL per object (so the slicer can arrange them); returns the paths."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     paths = []

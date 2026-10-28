@@ -26,10 +26,35 @@ export interface PlanEntry {
   copies: number;
   /** 3MF: >0 one saved plate, 0 every object together, -1 each saved plate on its own bed. */
   plate: number;
+  /** 3MF plates to use when `plate` is 0 or -1; empty means all. */
+  selection: number[];
   parts: ModelPart[];
 }
 
 export const SEPARATE_PLATES = -1;
+
+/** Which saved plates of a 3MF to slice; `plates` empty means all of them. */
+export interface PlateChoice {
+  plates: number[];
+  separate: boolean;
+}
+
+/** The chosen plates (all when none are listed), in plate order. */
+export function chosenPlates(m: Model, choice: PlateChoice): number[] {
+  const all = (m.plates ?? []).map((p) => p.index);
+  return choice.plates.length ? all.filter((i) => choice.plates.includes(i)) : all;
+}
+
+/** The `model_plates` / `plate_selection` values the server expects for one model. */
+export function plateRequest(m: Model, choice: PlateChoice | undefined): { plate: number; selection: number[] } {
+  if (!choice || !m.plates || m.plates.length < 2) return { plate: 0, selection: [] };
+  const chosen = chosenPlates(m, choice);
+  if (chosen.length === 1) return { plate: chosen[0], selection: [] };
+  return {
+    plate: choice.separate ? SEPARATE_PLATES : 0,
+    selection: chosen.length === m.plates.length ? [] : chosen,
+  };
+}
 
 /** Polygon area (mm²) of a printer's printable outline. */
 export function polygonArea(points: [number, number][]): number {
@@ -57,8 +82,9 @@ export function planBeds(entries: PlanEntry[], coverage: number, bedArea: number
       footprint: p.footprint,
     });
     const is3mf = e.model.ext === ".3mf";
+    const wanted = (plate: number) => !e.selection.length || e.selection.includes(plate);
     if (is3mf && e.plate === SEPARATE_PLATES) {
-      for (const plate of e.model.plates ?? []) {
+      for (const plate of (e.model.plates ?? []).filter((p) => wanted(p.index))) {
         const objs = e.parts.filter((p) => p.plate === plate.index);
         for (let c = 0; c < e.copies; c++) {
           const parts = objs.map((p) => toPart(p, c));
@@ -66,7 +92,11 @@ export function planBeds(entries: PlanEntry[], coverage: number, bedArea: number
         }
       }
     } else {
-      const objs = is3mf && e.plate > 0 ? e.parts.filter((p) => p.plate === e.plate) : e.parts;
+      const objs = !is3mf
+        ? e.parts
+        : e.plate > 0
+          ? e.parts.filter((p) => p.plate === e.plate)
+          : e.parts.filter((p) => wanted(p.plate));
       for (let c = 0; c < e.copies; c++) objs.forEach((p) => loose.push(toPart(p, c)));
     }
   });

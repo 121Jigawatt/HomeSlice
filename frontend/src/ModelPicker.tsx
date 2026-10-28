@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { formatBytes, Model } from "./api";
+import { chosenPlates, PlateChoice } from "./bedPlan";
 import { Icon } from "./icons";
 import { ModelThumb } from "./ModelThumb";
 
@@ -29,6 +30,68 @@ function Quantity({ name, value, onChange }: { name: string; value: number; onCh
 
 const MAX_COPIES = 100;
 
+/** Checkboxes for a 3MF's saved plates, plus whether several plates get a bed each or share beds. */
+function PlatePicker({ model, choice, onChange }: { model: Model; choice: PlateChoice; onChange: (c: PlateChoice) => void }) {
+  const all = model.plates ?? [];
+  const chosen = chosenPlates(model, choice);
+  const setPlates = (plates: number[]) => onChange({ ...choice, plates: plates.length === all.length ? [] : plates });
+  const toggle = (index: number) =>
+    setPlates(chosen.includes(index) ? chosen.filter((i) => i !== index) : [...chosen, index].sort((a, b) => a - b));
+  const name = model.filename;
+  return (
+    <div className="plate-picker">
+      <div className="row between">
+        <span className="small muted" id={`plates-${model.id}`}>
+          Plates: {chosen.length} of {all.length}
+        </span>
+        <button
+          type="button"
+          className="secondary small"
+          onClick={() => setPlates(chosen.length === all.length ? [all[0].index] : all.map((p) => p.index))}
+        >
+          {chosen.length === all.length ? `Only plate ${all[0].index}` : "Select all"}
+        </button>
+      </div>
+      <div className="plate-chips" role="group" aria-labelledby={`plates-${model.id}`}>
+        {all.map((p) => {
+          const on = chosen.includes(p.index);
+          return (
+            <label key={p.index} className="plate-chip" title={p.name || undefined}>
+              <input
+                type="checkbox"
+                checked={on}
+                disabled={on && chosen.length === 1}
+                onChange={() => toggle(p.index)}
+                aria-label={`Plate ${p.index}${p.name ? `: ${p.name}` : ""} of ${name}`}
+              />
+              <span className="plate-chip-text">
+                <span className="plate-chip-name">
+                  <b>{p.index}</b> {p.name}
+                </span>
+                <span className="muted">
+                  {p.objects} object{p.objects === 1 ? "" : "s"}
+                </span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      {chosen.length > 1 && (
+        <div className="bed-mode" role="radiogroup" aria-label={`How to place the plates of ${name}`}>
+          <label className="check">
+            <input type="radio" name={`bed-mode-${model.id}`} checked={choice.separate} onChange={() => onChange({ ...choice, separate: true })} />
+            Each plate on its own bed ({chosen.length} beds)
+          </label>
+          <label className="check">
+            <input type="radio" name={`bed-mode-${model.id}`} checked={!choice.separate} onChange={() => onChange({ ...choice, separate: false })} />
+            Arrange their objects onto shared beds
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Selected models plus an "Add models" dialog to search the library and pick from it. */
 export function ModelPicker({
   models,
@@ -37,8 +100,8 @@ export function ModelPicker({
   onToggle,
   copies,
   onCopies,
-  plates,
-  onPlate,
+  plateChoice,
+  onPlateChoice,
 }: {
   models: Model[];
   loaded: boolean;
@@ -46,8 +109,8 @@ export function ModelPicker({
   onToggle: (id: string) => void;
   copies: Record<string, number>;
   onCopies: (id: string, n: number) => void;
-  plates: Record<string, number>;
-  onPlate: (id: string, plate: number) => void;
+  plateChoice: (m: Model) => PlateChoice | undefined;
+  onPlateChoice: (id: string, choice: PlateChoice) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
@@ -88,25 +151,10 @@ export function ModelPicker({
                 <Icon name="close" size={16} />
               </button>
               <div className="picked-controls">
-                {m.plates && m.plates.length > 1 && (
-                  <label className="plate-select">
-                    <span className="small muted">Plates</span>
-                    <select value={plates[m.id] ?? m.plates[0].index} onChange={(e) => onPlate(m.id, Number(e.target.value))}>
-                      <optgroup label="One saved plate">
-                        {m.plates.map((p) => (
-                          <option key={p.index} value={p.index}>
-                            Plate {p.index}
-                            {p.name ? `: ${p.name}` : ""} ({p.objects} object{p.objects === 1 ? "" : "s"})
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label={`All ${m.plates.length} plates`}>
-                        <option value={-1}>Each plate on its own bed ({m.plates.length} beds)</option>
-                        <option value={0}>All objects arranged onto shared beds</option>
-                      </optgroup>
-                    </select>
-                  </label>
-                )}
+                {(() => {
+                  const choice = plateChoice(m);
+                  return choice ? <PlatePicker model={m} choice={choice} onChange={(c) => onPlateChoice(m.id, c)} /> : null;
+                })()}
                 <div className="copies">
                   <span className="small muted">Copies</span>
                   <Quantity name={m.filename} value={copies[m.id] ?? 1} onChange={(n) => onCopies(m.id, n)} />

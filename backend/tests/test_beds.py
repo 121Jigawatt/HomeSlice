@@ -11,7 +11,7 @@ from test_threemf import bambu_project
 
 from homeslice.app import build_services
 from homeslice.library.step import write_binary_stl
-from homeslice.orca.cli import RunResult
+from homeslice.orca.cli import RunResult, SliceArgsError
 from homeslice.library.thumbnails import footprint_mm2
 from homeslice.orca.jobs import JobRequest, bed_area, combine_stats
 
@@ -117,6 +117,23 @@ def test_each_3mf_plate_on_its_own_bed(svc, settings):
     calls = _run_capturing(svc, settings, job_id)
     assert [sum(a.endswith(".stl") for a in c) for c in calls] == [1, 2]
 
+
+def test_chosen_3mf_plates(svc, settings):
+    mid = uuid.uuid4().hex
+    svc.db.execute(
+        "INSERT INTO models(id, filename, ext, size, sha256, created_at) VALUES(?, 'Ring.3mf', '.3mf', 1, 'x', 0)", (mid,)
+    )
+    bambu_project(settings.library_dir / f"{mid}.3mf")
+    separate = svc.jobs.submit(JobRequest([mid], "P", "Q", ["F"], copies=[2], model_plates=[-1], plate_selection=[[2]]))
+    assert svc.jobs.get(separate)["title"] == "Ring.3mf (plate 2) \u00d72"
+    assert [sum(a.endswith(".stl") for a in c) for c in _run_capturing(svc, settings, separate)] == [2, 2]
+
+    shared = svc.jobs.submit(JobRequest([mid], "P", "Q", ["F"], model_plates=[0], plate_selection=[[2]]))
+    assert [sum(a.endswith(".stl") for a in c) for c in _run_capturing(svc, settings, shared)] == [2]
+
+    for bad in ([0], [[3]]), ([1], [[2]]):
+        with pytest.raises(SliceArgsError):
+            svc.jobs.submit(JobRequest([mid], "P", "Q", ["F"], model_plates=bad[0], plate_selection=bad[1]))
 
 def test_bed_coverage_validated(svc, settings):
     mid = _stl_model(svc, settings)

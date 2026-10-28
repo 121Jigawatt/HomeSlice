@@ -54,6 +54,8 @@ class JobRequest:
     # 3MF plate per model (0 = every plate on shared beds, -1 = each plate on its own bed), parallel to
     # model_ids; empty means 0 for all.
     model_plates: list[int] = field(default_factory=list)
+    # 3MF plates to use per model when model_plates is 0 or -1, parallel to model_ids; empty means all plates.
+    plate_selection: list[list[int]] = field(default_factory=list)
     # Start a new bed once object footprints would cover more than this % of it (set per printer).
     bed_coverage: int = 50
 
@@ -62,6 +64,9 @@ class JobRequest:
 
     def plates_for(self) -> list[int]:
         return self.model_plates or [0] * len(self.model_ids)
+
+    def selections(self) -> list[list[int]]:
+        return self.plate_selection or [[] for _ in self.model_ids]
 
 
 MAX_COPIES = 100
@@ -234,17 +239,28 @@ class JobManager:
             raise SliceArgsError(f"At most {MAX_OBJECTS} objects can be sliced at once")
         if req.model_plates and len(req.model_plates) != len(req.model_ids):
             raise SliceArgsError("Give one plate per model")
+        if req.plate_selection and len(req.plate_selection) != len(req.model_ids):
+            raise SliceArgsError("Give one plate selection per model")
         if not MIN_COVERAGE <= req.bed_coverage <= 100:
             raise SliceArgsError(f"Bed coverage must be between {MIN_COVERAGE}% and 100%")
         validate_overrides(req.overrides)
         names = []
-        for mid, plate in zip(req.model_ids, req.plates_for()):
+        for mid, plate, chosen in zip(req.model_ids, req.plates_for(), req.selections()):
             record = self._library.get(mid)
             if record is None:
                 raise SliceArgsError("Unknown model")
             name = record["filename"]
-            if plate == SEPARATE_PLATES:
-                if not record.get("plates"):
+            saved = [p["index"] for p in record.get("plates") or []]
+            if chosen and plate > 0:
+                raise SliceArgsError(f"{name}: choose one plate or a set of plates, not both")
+            if unknown := set(chosen) - set(saved):
+                raise SliceArgsError(f"{name} has no plate {min(unknown)}")
+            if chosen and len(chosen) < len(saved):
+                listed = ", ".join(str(i) for i in sorted(set(chosen)))
+                each = ", each on its own bed" if plate == SEPARATE_PLATES and len(set(chosen)) > 1 else ""
+                name = f"{name} (plate{'s' if len(set(chosen)) > 1 else ''} {listed}{each})"
+            elif plate == SEPARATE_PLATES:
+                if not saved:
                     raise SliceArgsError(f"{name} has no saved plates")
                 name = f"{name} (each plate)"
             elif plate:
@@ -541,16 +557,20 @@ class JobManager:
         """
         fixed: list[list[Path | None]] = []
         loose: list[Path | None] = []
-        for i, (mid, n, plate) in enumerate(zip(req.model_ids, req.counts(), req.plates_for())):
+        for i, (mid, n, plate, chosen) in enumerate(
+            zip(req.model_ids, req.counts(), req.plates_for(), req.selections())
+        ):
             source = self._library.path_for(mid)
             if source is not None and source.suffix == ".3mf" and plate == SEPARATE_PLATES:
                 for p in await asyncio.to_thread(threemf.plates, source):
+                    if chosen and p["index"] not in chosen:
+                        continue
                     parts = await asyncio.to_thread(
                         threemf.write_items, source, jdir / "inputs" / f"{i}_plate{p['index']}", p["index"]
                     )
                     fixed += [list(parts) for _ in range(n)]
             elif source is not None and source.suffix == ".3mf":
-                parts = await asyncio.to_thread(threemf.write_items, source, jdir / "inputs" / str(i), plate)
+                parts = await asyncio.to_thread(threemf.write_items, source, jdir / "inputs" / str(i), plate or chosen)
                 loose += list(parts) * n
             else:
                 loose += [await asyncio.to_thread(self._library.mesh_path, mid)] * n

@@ -210,8 +210,21 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .picked-model:last-child { border-bottom: 0; padding-bottom: 0; }
 .picked-name { overflow-wrap: anywhere; }
 .picked-controls { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.75rem; }
-.plate-select { flex: 1 1 14rem; min-width: 0; gap: 0.2rem; }
-.plate-select select { padding: 0.45rem 0.5rem; font-size: 0.95rem; }
+.plate-picker { flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.plate-picker .small.secondary { min-height: 32px; padding: 0.2rem 0.6rem; }
+.plate-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr)); gap: 0.35rem; }
+.plate-chip {
+  flex-direction: row; align-items: center; gap: 0.4rem; min-height: 40px; min-width: 0;
+  padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; cursor: pointer;
+}
+.plate-chip:has(input:checked) { border-color: var(--accent); background: rgba(20, 184, 166, 0.12); }
+.plate-chip input { flex: 0 0 auto; }
+.plate-chip-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.plate-chip-text .muted { font-size: 0.78rem; }
+.plate-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bed-mode { display: flex; flex-wrap: wrap; gap: 0 1rem; font-size: 0.9rem; }
+.bed-mode label.check { gap: 0.45rem; min-height: 40px; }
+.bed-mode input[type="radio"] { width: 1.1rem; height: 1.1rem; min-height: 0; accent-color: var(--accent); }
 .copies { display: flex; flex-direction: column; gap: 0.2rem; }
 .quantity { display: inline-flex; align-items: center; gap: 0.25rem; flex: 0 0 auto; }
 .quantity input { width: 3.6rem; text-align: center; padding: 0.55rem 0.25rem; -moz-appearance: textfield; }

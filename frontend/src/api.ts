@@ -119,6 +119,7 @@ export interface Job {
     model_ids: string[];
     copies?: number[];
     model_plates?: number[];
+    plate_selection?: number[][];
     printer: string;
     process: string;
     filaments: string[];

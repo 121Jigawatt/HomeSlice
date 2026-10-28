@@ -1,4 +1,5 @@
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -26,6 +27,9 @@ class JobBody(BaseModel):
     plate: int = Field(default=0, ge=0, le=99)
     copies: list[int] = Field(default_factory=list, max_length=50)
     model_plates: list[int] = Field(default_factory=list, max_length=50)
+    plate_selection: list[Annotated[list[Annotated[int, Field(ge=1, le=999)]], Field(max_length=200)]] = Field(
+        default_factory=list, max_length=50
+    )
     # Physical printer the result is meant for; its printer profile must match `printer`.
     target_printer_id: str | None = Field(default=None, max_length=64)
     # Overrides the target printer's bed coverage for this slice.
