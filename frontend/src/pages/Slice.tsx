@@ -217,12 +217,14 @@ export default function SlicePage() {
   };
 
   return (
-    <form className="stack" onSubmit={submit}>
-      <h2>Slice</h2>
-      <PrinterStrip />
-      {prefillNote && <p className="muted small">{prefillNote}</p>}
+    <form className="stack slice-form" onSubmit={submit}>
+      <h1 className="span-all">Slice</h1>
+      <div className="span-all">
+        <PrinterStrip />
+      </div>
+      {prefillNote && <p className="muted small span-all">{prefillNote}</p>}
 
-      <fieldset className="card stack">
+      <fieldset className="card stack slice-models">
         <legend>Models</legend>
         {models.length === 0 && <p className="muted">Upload a model in the Library first.</p>}
         {models.map((m) => (
@@ -349,7 +351,7 @@ export default function SlicePage() {
         </label>
       </fieldset>
 
-      <fieldset className="card stack">
+      <fieldset className="card form-grid">
         <legend>Quick overrides (optional)</legend>
         <label>
           Layer height (mm)

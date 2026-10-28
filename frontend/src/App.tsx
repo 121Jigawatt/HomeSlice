@@ -9,6 +9,8 @@ import SettingsPage from "./pages/Settings";
 import { PrinterProvider } from "./printers";
 import { JobWatcher } from "./jobWatcher";
 import { ToastProvider } from "./toast";
+import { ConfirmProvider } from "./ui";
+import { Icon, IconName } from "./icons";
 
 export default function App() {
   const location = useLocation();
@@ -41,37 +43,85 @@ export default function App() {
 
   return (
     <ToastProvider>
+    <ConfirmProvider>
     <PrinterProvider>
     <JobWatcher />
+    <a className="skip-link" href="#main">Skip to content</a>
     <div className="app">
       <header className="topbar">
         <span className="brand">HomeSlice</span>
-        <Link className="button small secondary" to="/orca">
-          Full Orca
+        <Link
+          className="button small secondary"
+          to="/orca"
+          title="Opens the complete OrcaSlicer desktop app in your browser, for editing presets and advanced plate work."
+        >
+          <Icon name="orca" size={16} />
+          <span>
+            <span className="wide-only">Advanced: </span>full OrcaSlicer
+          </span>
         </Link>
       </header>
-      <main className="content">
+      <main className="content" id="main" tabIndex={-1}>
         <Routes>
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/login" element={<Navigate to="/library" replace />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/slice" element={<SlicePage />} />
           <Route path="/jobs" element={<JobsPage />} />
-          <Route path="/jobs/:id" element={<JobPage />} />
+          <Route path="/jobs/:id" element={<JobSplit />} />
           <Route path="/settings" element={<SettingsPage username={status.username ?? ""} onLogout={refresh} />} />
           <Route path="*" element={<Navigate to="/library" replace />} />
         </Routes>
       </main>
-      <nav className="tabbar">
-        <NavLink to="/library">Library</NavLink>
-        <NavLink to="/slice">Slice</NavLink>
-        <NavLink to="/jobs">Jobs</NavLink>
-        <NavLink to="/settings">Settings</NavLink>
+      <nav className="tabbar" aria-label="Main">
+        {NAV.map(([to, label, icon]) => (
+          <NavLink key={to} to={to}>
+            <span className="nav-icon">
+              <Icon name={icon} size={22} />
+            </span>
+            {label}
+          </NavLink>
+        ))}
       </nav>
     </div>
     </PrinterProvider>
+    </ConfirmProvider>
     </ToastProvider>
   );
+}
+
+const NAV: [string, string, IconName][] = [
+  ["/library", "Library", "library"],
+  ["/slice", "Slice", "slice"],
+  ["/jobs", "Jobs", "jobs"],
+  ["/settings", "Settings", "settings"],
+];
+
+/** On wide screens a job opens beside the list; on phones and tablets it takes the whole page. */
+function JobSplit() {
+  const wide = useMediaQuery("(min-width: 1024px)");
+  if (!wide) return <JobPage />;
+  return (
+    <div className="split">
+      <div className="split-list">
+        <JobsPage compact />
+      </div>
+      <div className="split-detail">
+        <JobPage />
+      </div>
+    </div>
+  );
+}
+
+function useMediaQuery(q: string): boolean {
+  const [match, setMatch] = useState(() => window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const on = () => setMatch(m.matches);
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, [q]);
+  return match;
 }
 
 function FullOrca() {

@@ -6,6 +6,7 @@ import { ModelThumb } from "../ModelThumb";
 import { displayName } from "../presetNames";
 import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinter } from "../printers";
 import { useToast } from "../toast";
+import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
 
 const ACTIVE = new Set(["queued", "running"]);
 const GcodeViewer = lazy(() => import("../viewer/GcodeViewer"));
@@ -54,6 +55,8 @@ function JobThumb({ job, size }: { job: Job; size?: number }) {
 }
 
 const PAGE = 30;
+/** Jobs deleted with an Undo window still open; hidden from the list until the delete commits. */
+const hiddenJobs = new Set<string>();
 const STATUS_FILTERS: [string, string][] = [
   ["", "All"],
   ["queued,running", "In progress"],
@@ -72,7 +75,8 @@ function dayLabel(ts: number): string {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 }
 
-export function JobsPage() {
+export function JobsPage({ compact = false }: { compact?: boolean }) {
+  const { id: selectedId } = useParams();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
   const [printersUsed, setPrintersUsed] = useState<string[]>([]);
@@ -141,6 +145,7 @@ export function JobsPage() {
 
   const groups: [string, Job[]][] = [];
   for (const j of jobs) {
+    if (hiddenJobs.has(j.id)) continue;
     const label = dayLabel(j.created_at);
     if (groups.length && groups[groups.length - 1][0] === label) groups[groups.length - 1][1].push(j);
     else groups.push([label, [j]]);
@@ -149,8 +154,8 @@ export function JobsPage() {
 
   return (
     <section className="stack">
-      <h2>Jobs</h2>
-      <PrinterStrip />
+      {compact ? <h2>Jobs</h2> : <h1>Jobs</h1>}
+      {!compact && <PrinterStrip />}
       <div className="card stack filters" role="search">
         <label>
           Search by model name
@@ -200,8 +205,8 @@ export function JobsPage() {
           <h3 className="group-head">{label}</h3>
           <ul className="list">
             {items.map((j) => (
-              <li key={j.id} className="card job-row">
-                <Link to={`/jobs/${j.id}`} className="row plain grow job-link">
+              <li key={j.id} className={`card job-row${j.id === selectedId ? " selected" : ""}`}>
+                <Link to={`/jobs/${j.id}`} className="row plain grow job-link" aria-current={j.id === selectedId ? "page" : undefined}>
                   <JobThumb job={j} />
                   <div className="grow">
                     <div className="title">{jobTitle(j)}</div>
@@ -286,6 +291,8 @@ export function JobPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const notify = useToast();
+  const confirm = useConfirm();
+  const undoableDelete = useUndoableDelete();
   const [job, setJob] = useState<Job | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -328,16 +335,31 @@ export function JobPage() {
   }
 
   async function remove() {
-    if (!confirm(`Delete the job for ${jobTitle(job!)} and its output?`)) return;
-    await api(`/api/jobs/${id}`, { method: "DELETE" });
-    navigate("/jobs");
+    const title = jobTitle(job!);
+    const ok = await confirm({
+      title: `Delete the job for ${title}?`,
+      body: <p>Its G-code and log are removed. The model stays in the library.</p>,
+      confirmLabel: "Delete job",
+      danger: true,
+    });
+    if (!ok) return;
+    const jobId = id!;
+    undoableDelete(
+      `the job for ${title}`,
+      () => {
+        hiddenJobs.add(jobId);
+        navigate("/jobs");
+      },
+      () => hiddenJobs.delete(jobId),
+      () => api(`/api/jobs/${jobId}`, { method: "DELETE" }).finally(() => hiddenJobs.delete(jobId)),
+    );
   }
 
   const info = job.error_info;
   return (
     <section className="stack">
       <div className="row between">
-        <h2>Job</h2>
+        <h1 className="grow title">{jobTitle(job)}</h1>
         <StatusBadge status={job.status} />
       </div>
       <div className="card row">
@@ -413,8 +435,8 @@ export function JobPage() {
         <div className="card stack">
           <strong>Output</strong>
           {job.files.map((f) => (
-            <a key={f} className="button secondary" href={`/api/jobs/${job.id}/files/${encodeURIComponent(f)}`}>
-              ⬇ {f}
+            <a key={f} className="button secondary" href={`/api/jobs/${job.id}/files/${encodeURIComponent(f)}`} download>
+              <Icon name="download" size={16} /> Download {f}
             </a>
           ))}
         </div>
@@ -434,9 +456,10 @@ export function JobPage() {
           </Link>
         )}
         {!ACTIVE.has(job.status) && (
-          <button className="small danger" onClick={remove}>
-            Delete job
-          </button>
+          <OverflowMenu
+            label={`More actions for this job`}
+            items={[{ label: "Delete job…", icon: "trash", danger: true, onSelect: remove }]}
+          />
         )}
       </div>
     </section>

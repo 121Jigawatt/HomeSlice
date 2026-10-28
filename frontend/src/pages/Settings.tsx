@@ -1,11 +1,12 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, OrcaStatus, Printer, PrinterStatus } from "../api";
 import { useToast } from "../toast";
+import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
 
 export default function SettingsPage({ username, onLogout }: { username: string; onLogout: () => void }) {
   return (
     <section className="stack">
-      <h2>Settings</h2>
+      <h1>Settings</h1>
       <Printers />
       <OrcaVersions />
       <JobCleanup />
@@ -86,15 +87,27 @@ function Printers() {
     }
   }
 
+  const confirm = useConfirm();
+  const undoableDelete = useUndoableDelete();
   async function remove(p: Printer) {
-    if (!confirm(`Remove ${p.name}?`)) return;
-    await api(`/api/printers/${p.id}`, { method: "DELETE" }).catch((e) => setError(e.message));
-    load();
+    const ok = await confirm({
+      title: `Remove ${p.name}?`,
+      body: <p>HomeSlice stops showing its status and can no longer send prints to it. Nothing on the printer changes.</p>,
+      confirmLabel: "Remove printer",
+      danger: true,
+    });
+    if (!ok) return;
+    undoableDelete(
+      p.name,
+      () => setPrinters((ps) => ps.filter((x) => x.id !== p.id)),
+      load,
+      () => api(`/api/printers/${p.id}`, { method: "DELETE" }).then(load),
+    );
   }
 
   return (
     <div className="card stack">
-      <strong>Printers</strong>
+      <h2>Printers</h2>
       {printers.length === 0 && <p className="muted small">No printers yet. Add a Klipper (Mainsail/Fluidd) printer below.</p>}
       <ul className="list">
         {printers.map((p) => (
@@ -105,30 +118,34 @@ function Printers() {
                 {p.url} · {states[p.id] ?? "checking…"}
               </div>
             </div>
-            <button className="small danger" onClick={() => remove(p)} aria-label={`Remove ${p.name}`}>
-              ✕
-            </button>
+            <OverflowMenu
+              label={`More actions for ${p.name}`}
+              items={[{ label: "Remove printer…", icon: "trash", danger: true, onSelect: () => remove(p) }]}
+            />
           </li>
         ))}
       </ul>
-      <form className="stack" onSubmit={add}>
-        <input placeholder="Name (e.g. SV08)" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} required />
-        <input
-          placeholder="Address, e.g. http://spi-xi.local or http://10.69.69.165"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          inputMode="url"
-          required
-        />
-        <input
-          type="password"
-          placeholder="Moonraker API key (optional)"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          autoComplete="off"
-        />
-        {error && <p className="error">{error}</p>}
-        <button className="small">Add printer</button>
+      <form className="stack form-grid" onSubmit={add} aria-label="Add a printer">
+        <label>
+          Name
+          <input placeholder="e.g. SV08" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} required />
+        </label>
+        <label>
+          Address
+          <input
+            placeholder="http://spi-xi.local or http://10.69.69.165"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            inputMode="url"
+            required
+          />
+        </label>
+        <label className="span-2">
+          Moonraker API key (optional)
+          <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
+        </label>
+        {error && <p className="error span-2">{error}</p>}
+        <button className="small span-2">Add printer</button>
       </form>
       <form className="stack" onSubmit={saveSubnet}>
         <label>
@@ -147,6 +164,7 @@ function Printers() {
 }
 
 function OrcaVersions() {
+  const confirm = useConfirm();
   const [status, setStatus] = useState<OrcaStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -194,7 +212,7 @@ function OrcaVersions() {
 
   return (
     <div className="card stack">
-      <strong>OrcaSlicer engine</strong>
+      <h2>OrcaSlicer engine</h2>
       <div className="small">
         Installed: <code>{status.current ?? "not installed"}</code>
       </div>
@@ -222,7 +240,14 @@ function OrcaVersions() {
           <button
             className="small secondary"
             disabled={busy}
-            onClick={() => confirm("Switch back to the previous version?") && run(() => api("/api/orca/rollback", { method: "POST" }))}
+            onClick={async () => {
+              const ok = await confirm({
+                title: `Switch back to OrcaSlicer ${status.previous}?`,
+                body: <p>New slices use the previous version. You can switch forward again from Installed versions.</p>,
+                confirmLabel: "Roll back",
+              });
+              if (ok) run(() => api("/api/orca/rollback", { method: "POST" }));
+            }}
           >
             Roll back
           </button>
@@ -282,6 +307,7 @@ function OrcaVersions() {
 
 function JobCleanup() {
   const notify = useToast();
+  const confirm = useConfirm();
   const [days, setDays] = useState(30);
   const [includeFailed, setIncludeFailed] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -289,7 +315,13 @@ function JobCleanup() {
   async function run(e: FormEvent) {
     e.preventDefault();
     const what = includeFailed ? "finished, failed and cancelled" : "finished";
-    if (!confirm(`Delete all ${what} jobs older than ${days} days, including their G-code?`)) return;
+    const ok = await confirm({
+      title: `Delete ${what} jobs older than ${days} days?`,
+      body: <p>Their G-code and logs are removed permanently. This can't be undone. Models stay in the library.</p>,
+      confirmLabel: "Delete old jobs",
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       const r = await api<{ removed: number }>("/api/jobs/cleanup", {
@@ -308,7 +340,7 @@ function JobCleanup() {
 
   return (
     <form className="card stack" onSubmit={run}>
-      <strong>Job history</strong>
+      <h2>Job history</h2>
       <label>
         Clear completed jobs older than (days)
         <input type="number" min={0} max={3650} value={days} onChange={(e) => setDays(Number(e.target.value))} required />
@@ -343,7 +375,7 @@ function PasswordForm() {
 
   return (
     <form className="card stack" onSubmit={submit}>
-      <strong>Change password</strong>
+      <h2>Change password</h2>
       <input type="password" placeholder="Current password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
       <input type="password" placeholder="New password (12+ characters)" autoComplete="new-password" minLength={12} value={next} onChange={(e) => setNext(e.target.value)} required />
       {msg && <p className={msg.ok ? "muted" : "error"}>{msg.text}</p>}

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, formatBytes, ImportPreview, Model, uploadModel } from "../api";
 import { ModelThumb } from "../ModelThumb";
 import { PrinterStrip } from "../printers";
+import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
 
 export default function LibraryPage() {
   const [models, setModels] = useState<Model[]>([]);
@@ -40,16 +41,28 @@ export default function LibraryPage() {
     load();
   }
 
+  const confirm = useConfirm();
+  const undoableDelete = useUndoableDelete();
   async function remove(m: Model) {
-    if (!confirm(`Delete ${m.filename}?`)) return;
-    await api(`/api/library/${m.id}`, { method: "DELETE" }).catch((e) => setError(e.message));
-    load();
+    const ok = await confirm({
+      title: `Delete ${m.filename}?`,
+      body: <p>The model file is removed from the library. Sliced jobs keep their G-code.</p>,
+      confirmLabel: "Delete model",
+      danger: true,
+    });
+    if (!ok) return;
+    undoableDelete(
+      m.filename,
+      () => setModels((ms) => ms.filter((x) => x.id !== m.id)),
+      load,
+      () => api(`/api/library/${m.id}`, { method: "DELETE" }).then(load),
+    );
   }
 
   return (
     <section className="stack">
       <div className="row between">
-        <h2>Library</h2>
+        <h1>Library</h1>
         <label className="button">
           Upload
           <input type="file" accept=".stl,.3mf,.obj,.step,.stp,.amf" multiple hidden onChange={onFiles} />
@@ -65,7 +78,7 @@ export default function LibraryPage() {
       <ImportFromLink onImported={load} />
       {error && <p className="error">{error}</p>}
       {models.length === 0 && <p className="muted">No models yet. Upload an STL, 3MF, OBJ or STEP file.</p>}
-      <ul className="list">
+      <ul className="list model-grid">
         {models.map((m) => (
           <li key={m.id} className="card row between">
             <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={64} />
@@ -79,12 +92,13 @@ export default function LibraryPage() {
               <Link className="button small" to={`/slice?model=${m.id}`}>
                 Slice
               </Link>
-              <a className="button small secondary" href={`/api/library/${m.id}/file`}>
-                ⬇
-              </a>
-              <button className="small danger" onClick={() => remove(m)} aria-label="Delete">
-                ✕
-              </button>
+              <OverflowMenu
+                label={`More actions for ${m.filename}`}
+                items={[
+                  { label: "Download", icon: "download", href: `/api/library/${m.id}/file`, download: true },
+                  { label: "Delete…", icon: "trash", danger: true, onSelect: () => remove(m) },
+                ]}
+              />
             </div>
           </li>
         ))}
@@ -146,18 +160,20 @@ function ImportFromLink({ onImported }: { onImported: () => void }) {
 
   return (
     <div className="card stack">
-      <strong>Import from link</strong>
-      <form className="row" onSubmit={lookup}>
-        <input
-          className="grow"
-          type="url"
-          inputMode="url"
-          placeholder="Paste a Printables or MakerWorld link"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          required
-        />
-        <button className="small" disabled={busy !== null}>
+      <h2 id="import-title">Import from link</h2>
+      <form className="row" onSubmit={lookup} aria-labelledby="import-title">
+        <label className="grow">
+          Printables or MakerWorld model page
+          <input
+            type="url"
+            inputMode="url"
+            placeholder="https://www.printables.com/model/…"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            required
+          />
+        </label>
+        <button className="small import-go" disabled={busy !== null}>
           {busy === "lookup" ? "Loading…" : "Look up"}
         </button>
       </form>
