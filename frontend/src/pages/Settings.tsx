@@ -1,6 +1,8 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { ActivityItem, api, OrcaStatus, Printer, PrinterStatus } from "../api";
 import { useMe } from "../auth";
+import { Icon } from "../icons";
 import { useToast } from "../toast";
 import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
 import { PrinterProfiles } from "../printerProfiles";
@@ -14,10 +16,10 @@ export default function SettingsPage({ username, onLogout }: { username: string;
       <h1>Settings</h1>
       {me.can("users.manage") && <UsersAndRoles />}
       {me.can("printers.manage") && <Printers />}
-      {me.can("orca.manage") && <OrcaVersions />}
+      {me.can("orca.manage", "orca.desktop") && <OrcaVersions manage={me.can("orca.manage")} desktop={me.can("orca.desktop")} />}
       {me.can("jobs.manage_all") && <JobCleanup />}
       {me.can("activity.view") && <ActivityLog />}
-      <PasswordForm />
+      {!me.ssoOnly && <PasswordForm />}
       <div className="card row between">
         <span>
           Signed in as <strong>{username}</strong>
@@ -186,7 +188,32 @@ function Printers() {
   );
 }
 
-function OrcaVersions() {
+function OpenDesktop() {
+  return (
+    <div className="stack orca-desktop">
+      <Link className="button secondary" to="/orca">
+        <Icon name="orca" size={18} /> Open full OrcaSlicer
+      </Link>
+      <p className="muted small users-intro">
+        The complete OrcaSlicer desktop app in your browser, for editing printer, filament and process presets and
+        advanced plate work. HomeSlice uses the same presets.
+      </p>
+    </div>
+  );
+}
+
+function OrcaVersions({ manage, desktop }: { manage: boolean; desktop: boolean }) {
+  if (!manage)
+    return (
+      <div className="card stack">
+        <h2>OrcaSlicer</h2>
+        <OpenDesktop />
+      </div>
+    );
+  return <OrcaEngine desktop={desktop} />;
+}
+
+function OrcaEngine({ desktop }: { desktop: boolean }) {
   const confirm = useConfirm();
   const [status, setStatus] = useState<OrcaStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -236,6 +263,7 @@ function OrcaVersions() {
   return (
     <div className="card stack">
       <h2>OrcaSlicer engine</h2>
+      {desktop && <OpenDesktop />}
       <div className="small">
         Installed: <code>{status.current ?? "not installed"}</code>
       </div>
@@ -362,6 +390,9 @@ const ACTIONS: Record<string, string> = {
   role_create: "Created a role",
   role_update: "Changed a role",
   role_delete: "Deleted a role",
+  login_sso: "Signed in with single sign-on",
+  sso_failed: "Single sign-on failed",
+  sso_settings: "Changed single sign-on settings",
   slice_reslice: "Re-sliced for another printer",
   printer_profiles: "Set a printer's profiles",
 };

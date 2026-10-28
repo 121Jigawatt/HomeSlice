@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from ..auth import AuthError, RateLimited, Session
-from .deps import SESSION_COOKIE, check_origin, client_ip, require, require_account
+from .deps import SESSION_COOKIE, check_origin, client_ip, require, require_account, set_session_cookie
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -27,6 +27,11 @@ class PasswordBody(BaseModel):
 def status(request: Request) -> dict:
     services = request.app.state.services
     session = services.auth.get_session(request.cookies.get(SESSION_COOKIE))
+    sso = services.oidc.config()
+    source = None
+    if session:
+        row = services.db.one("SELECT auth_source FROM users WHERE id=?", (session.user_id,))
+        source = row["auth_source"] if row else None
     return {
         "setup_required": not services.auth.has_users(),
         "authenticated": session is not None,
@@ -34,6 +39,8 @@ def status(request: Request) -> dict:
         "csrf_token": session.csrf_token if session else None,
         "permissions": sorted(session.permissions) if session else [],
         "must_change_password": session.must_change_password if session else False,
+        "auth_source": source,
+        "sso": {"enabled": sso.enabled, "label": sso.label} if sso.enabled else None,
     }
 
 
@@ -61,15 +68,7 @@ def login(body: LoginBody, request: Request, response: Response) -> dict:
         services.auth.audit(body.username[:64], "login_failed", "", ip)
         raise HTTPException(401, str(e)) from None
     services.auth.audit(session.username, "login", "", ip)
-    response.set_cookie(
-        SESSION_COOKIE,
-        token,
-        max_age=services.settings.session_ttl_hours * 3600,
-        httponly=True,
-        secure=services.settings.cookie_secure,
-        samesite="strict",
-        path="/",
-    )
+    set_session_cookie(response, services.settings, token)
     return {"username": session.username, "csrf_token": session.csrf_token}
 
 

@@ -303,6 +303,14 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .role-option, .perm-option { align-items: flex-start; gap: 0.6rem; padding: 0.35rem 0; min-height: 0; }
 .role-option input, .perm-option input { margin-top: 0.15rem; flex: 0 0 auto; }
 .perm-summary { color: var(--muted); overflow-wrap: anywhere; margin-top: 0.2rem; }
+.divider { display: flex; align-items: center; gap: 0.6rem; padding: 0; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.copy-field { font-family: ui-monospace, monospace; font-size: 0.85rem; }
+label > span.small { padding: 0; }
+.sso-form label.check { flex-wrap: nowrap; align-items: flex-start; gap: 0.6rem; }
+.sso-form label.check input { flex: 0 0 auto; margin-top: 0.1rem; }
+.steps { margin: 0.4rem 0 0.2rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.group-role { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 10rem) auto; gap: 0.4rem; align-items: center; }
 /* .small also pads buttons; text in these lists shouldn't be. */
 :is(.user-row, .sub-card) :is(div, span, p, legend).small, p.users-intro { padding: 0; margin: 0; }
 .user-row .badge.small { padding: 0.2rem 0.55rem; }

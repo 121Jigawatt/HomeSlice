@@ -3,7 +3,7 @@ import uuid
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
 
 from ..auth import Session
 
@@ -13,6 +13,18 @@ UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
+
+
+def set_session_cookie(response: Response, settings, token: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=settings.session_ttl_hours * 3600,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
+        path="/",
+    )
 
 
 def check_origin(request: Request) -> None:

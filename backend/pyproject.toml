@@ -14,6 +14,7 @@ dependencies = [
     "numpy>=1.26",
     "defusedxml>=0.7",
     "cascadio>=0.1.1",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [project.optional-dependencies]

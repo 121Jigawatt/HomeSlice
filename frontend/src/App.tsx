@@ -61,7 +61,7 @@ export default function App() {
     );
   if (!status || !me) return <div className="center muted">Loading…</div>;
   if (status.setup_required) return <SetupPage onDone={refresh} />;
-  if (!status.authenticated) return <LoginPage onDone={refresh} />;
+  if (!status.authenticated) return <LoginPage onDone={refresh} sso={status.sso} />;
   if (status.must_change_password) return <ChangePasswordPage username={me.username} onDone={refresh} />;
   if (location.pathname === "/orca" && me.can("orca.desktop")) return <FullOrca />;
 
@@ -79,18 +79,6 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <span className="brand">HomeSlice</span>
-        {me.can("orca.desktop") && (
-          <Link
-            className="button small secondary"
-            to="/orca"
-            title="Opens the complete OrcaSlicer desktop app in your browser, for editing presets and advanced plate work."
-          >
-            <Icon name="orca" size={16} />
-            <span>
-              <span className="wide-only">Advanced: </span>full OrcaSlicer
-            </span>
-          </Link>
-        )}
       </header>
       <main className="content" id="main" tabIndex={-1}>
         <CertBanner />
@@ -164,7 +152,7 @@ function FullOrca() {
   return (
     <div className="orca-page">
       <header className="orca-bar">
-        <Link className="button small secondary" to="/library">
+        <Link className="button small secondary" to="/settings">
           ← HomeSlice
         </Link>
         <span className="muted small">OrcaSlicer</span>

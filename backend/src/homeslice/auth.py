@@ -140,6 +140,13 @@ class AuthService:
         self._db.execute("UPDATE users SET last_login=? WHERE id=?", (now, row["id"]))
         return self._create_session(row["id"], row["username"], bool(row["must_change_password"]), now)
 
+    def sso_login(self, user_id: int) -> tuple[str, Session]:
+        """A session for a user the identity provider vouched for (already checked: exists, not disabled)."""
+        now = time.time()
+        row = self._db.one("SELECT username FROM users WHERE id=?", (user_id,))
+        self._db.execute("UPDATE users SET last_login=?, must_change_password=0 WHERE id=?", (now, user_id))
+        return self._create_session(user_id, row["username"], False, now)
+
     def _create_session(self, user_id: int, username: str, must_change: bool, now: float) -> tuple[str, Session]:
         token = secrets.token_urlsafe(32)
         csrf = secrets.token_urlsafe(32)

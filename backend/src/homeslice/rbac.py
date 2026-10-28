@@ -188,7 +188,10 @@ class Rbac:
     # Users
 
     def users(self) -> list[dict]:
-        rows = self._db.all("SELECT id, username, disabled, must_change_password, created_at, last_login FROM users ORDER BY username")
+        rows = self._db.all(
+            "SELECT id, username, disabled, must_change_password, created_at, last_login, auth_source, oidc_sub "
+            "FROM users ORDER BY username"
+        )
         links = self._db.all("SELECT user_id, role_id FROM user_roles")
         out = []
         for r in rows:
@@ -200,6 +203,8 @@ class Rbac:
                     "must_change_password": bool(r["must_change_password"]),
                     "created_at": r["created_at"],
                     "last_login": r["last_login"],
+                    "auth_source": r["auth_source"],
+                    "sso_linked": bool(r["oidc_sub"]),
                     "roles": [link["role_id"] for link in links if link["user_id"] == r["id"]],
                 }
             )
@@ -231,6 +236,19 @@ class Rbac:
                 user_id = conn.execute(
                     "INSERT INTO users(username, password_hash, must_change_password, created_at) VALUES(?, ?, ?, ?)",
                     (username, pw_hash, int(must_change_password), time.time()),
+                ).lastrowid
+                self._set_roles(conn, user_id, role_ids)
+        except sqlite3.IntegrityError:
+            raise RbacError(f'The username "{username}" is taken') from None
+        return self._user(user_id)
+
+    def create_sso_user(self, username: str, sub: str, role_ids: list[int]) -> dict:
+        # "!" is never a valid argon2 hash, so these accounts can't sign in with a password.
+        try:
+            with self._db.tx() as conn:
+                user_id = conn.execute(
+                    "INSERT INTO users(username, password_hash, auth_source, oidc_sub, created_at) VALUES(?, '!', 'oidc', ?, ?)",
+                    (username, sub, time.time()),
                 ).lastrowid
                 self._set_roles(conn, user_id, role_ids)
         except sqlite3.IntegrityError:

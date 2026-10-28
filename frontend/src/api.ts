@@ -77,6 +77,8 @@ export interface AuthStatus {
   csrf_token: string | null;
   permissions: string[];
   must_change_password: boolean;
+  auth_source: "local" | "oidc" | null;
+  sso: { enabled: boolean; label: string } | null;
 }
 
 export interface Model {

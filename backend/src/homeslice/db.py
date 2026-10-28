@@ -85,6 +85,13 @@ CREATE TABLE IF NOT EXISTS user_roles(
     role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
     PRIMARY KEY(user_id, role_id)
 );
+CREATE TABLE IF NOT EXISTS oidc_states(
+    state TEXT PRIMARY KEY,
+    nonce TEXT NOT NULL,
+    verifier TEXT NOT NULL,
+    next TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
 """
 
 # Columns added after a table first shipped: (table, column, type).
@@ -111,7 +118,16 @@ ADDED_COLUMNS = [
     # Set when an admin creates the account or resets its password; cleared once the user picks their own.
     ("users", "must_change_password", "INTEGER NOT NULL DEFAULT 0"),
     ("users", "last_login", "REAL"),
+    # "local" (password) or "oidc" (single sign-on only; no usable password).
+    ("users", "auth_source", "TEXT NOT NULL DEFAULT 'local'"),
+    # Subject of the linked single sign-on identity.
+    ("users", "oidc_sub", "TEXT"),
 ]
+
+# Run after ADDED_COLUMNS, since they may index those columns.
+POST_MIGRATION = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc_sub ON users(oidc_sub) WHERE oidc_sub IS NOT NULL;
+"""
 
 
 class Database:
@@ -127,6 +143,7 @@ class Database:
                 existing = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
                 if column not in existing:
                     self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+            self._conn.executescript(POST_MIGRATION)
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:

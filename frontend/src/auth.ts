@@ -19,6 +19,8 @@ export type Permission =
 
 export interface Me {
   username: string;
+  /** Signed up through single sign-on, so there's no HomeSlice password to change. */
+  ssoOnly: boolean;
   can: (...anyOf: Permission[]) => boolean;
   /** True for something this user created (models, jobs, queued prints). */
   owns: (owner: string | null | undefined) => boolean;
@@ -29,12 +31,13 @@ export function makeMe(status: AuthStatus): Me {
   const username = status.username ?? "";
   return {
     username,
+    ssoOnly: status.auth_source === "oidc",
     can: (...anyOf) => anyOf.some((p) => perms.has(p)),
     owns: (owner) => !!owner && owner.toLowerCase() === username.toLowerCase(),
   };
 }
 
-export const AuthContext = createContext<Me>({ username: "", can: () => false, owns: () => false });
+export const AuthContext = createContext<Me>({ username: "", ssoOnly: false, can: () => false, owns: () => false });
 
 export function useMe(): Me {
   return useContext(AuthContext);

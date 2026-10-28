@@ -9,13 +9,23 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from .api import auth_routes, import_routes, library_routes, orca_routes, printer_routes, slicing_routes, user_routes
+from .api import (
+    auth_routes,
+    import_routes,
+    library_routes,
+    orca_routes,
+    printer_routes,
+    slicing_routes,
+    sso_routes,
+    user_routes,
+)
 from .auth import AuthService
 from .config import Settings
 from .crypto import SecretBox
 from .db import Database
 from .importer.sources import Importer
 from .library.service import Library
+from .oidc import Oidc
 from .orca.jobs import JobManager
 from .orca.profiles import ProfileStore
 from .orca.updater import UpdateError, Updater
@@ -78,6 +88,7 @@ class Services:
     jobs: JobManager
     printers: Printers
     importer: Importer
+    oidc: Oidc
     queue: PrintQueue | None = None
     background_tasks: set[asyncio.Task] = field(default_factory=set)
 
@@ -89,11 +100,12 @@ def build_services(settings: Settings) -> Services:
     library = Library(db, settings)
     profiles = ProfileStore(settings.orca_datadir, versions.system_profile_dirs())
     secrets = SecretBox(settings.secret_key_file or settings.config_dir / "secret.key")
+    auth = AuthService(db, settings)
     services = Services(
         settings=settings,
         db=db,
         secrets=secrets,
-        auth=AuthService(db, settings),
+        auth=auth,
         library=library,
         profiles=profiles,
         versions=versions,
@@ -101,6 +113,7 @@ def build_services(settings: Settings) -> Services:
         jobs=JobManager(db, settings, library, profiles, versions),
         printers=Printers(db, secrets),
         importer=Importer(library, settings.tmp_dir, settings.max_upload_mb * 1024**2),
+        oidc=Oidc(db, secrets, auth.rbac),
     )
 
     def remote_name(job_id: str, file: str) -> str:
@@ -207,6 +220,7 @@ def create_app(settings: Settings | None = None, *, start_background: bool = Tru
         printer_routes.router,
         orca_routes.router,
         user_routes.router,
+        sso_routes.router,
     ):
         app.include_router(router)
 

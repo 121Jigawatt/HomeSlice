@@ -13,6 +13,8 @@ interface UserRow {
   created_at: number;
   last_login: number | null;
   roles: number[];
+  auth_source: "local" | "oidc";
+  sso_linked: boolean;
 }
 
 interface Role {
@@ -68,6 +70,7 @@ export function UsersAndRoles() {
     <>
       <Users users={users} roles={roles} reload={load} />
       <Roles roles={roles} perms={perms} reload={load} />
+      <SingleSignOn roles={roles} />
     </>
   );
 }
@@ -199,6 +202,7 @@ function Users({ users, roles, reload }: { users: UserRow[]; roles: Role[]; relo
                       <span className="badge warn">No role: can't do anything</span>
                     )}
                     {u.disabled && <span className="badge failed">Disabled</span>}
+                    {u.sso_linked && <span className="badge done">Single sign-on{u.auth_source === "oidc" ? " only" : ""}</span>}
                     {u.must_change_password && !u.disabled && <span className="badge queued">Must set password</span>}
                   </div>
                   <div className="muted small">
@@ -212,7 +216,9 @@ function Users({ users, roles, reload }: { users: UserRow[]; roles: Role[]; relo
                     ...(self
                       ? []
                       : [
-                          { label: "Reset password…", icon: "key" as const, onSelect: () => setOpen({ id: u.id, mode: "password" }) },
+                          ...(u.auth_source === "oidc"
+                            ? []
+                            : [{ label: "Reset password…", icon: "key" as const, onSelect: () => setOpen({ id: u.id, mode: "password" }) }]),
                           {
                             label: u.disabled ? "Enable account" : "Disable account…",
                             icon: "offline" as const,
@@ -496,5 +502,235 @@ function Roles({ roles, perms, reload }: { roles: Role[]; perms: PermissionInfo[
         ))}
       </ul>
     </div>
+  );
+}
+
+interface SsoConfig {
+  enabled: boolean;
+  issuer: string;
+  client_id: string;
+  base_url: string;
+  label: string;
+  username_claim: string;
+  create_users: boolean;
+  link_existing: boolean;
+  default_roles: number[];
+  group_roles: { group: string; role: number }[];
+  verify_tls: boolean;
+  has_secret: boolean;
+  redirect_uri: string;
+}
+
+/** OpenID Connect sign-in through authentik (or any OIDC provider). */
+function SingleSignOn({ roles }: { roles: Role[] }) {
+  const notify = useToast();
+  const [cfg, setCfg] = useState<SsoConfig | null>(null);
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<SsoConfig>("/api/sso")
+      .then((c) => setCfg({ ...c, base_url: c.base_url || window.location.origin }))
+      .catch((e) => setError(e.message));
+  }, []);
+
+  if (!cfg) return <div className="card muted">{error ?? "Loading single sign-on…"}</div>;
+  const set = (patch: Partial<SsoConfig>) => setCfg({ ...cfg, ...patch });
+  const redirectUri = `${cfg.base_url.replace(/\/+$/, "")}/api/auth/oidc/callback`;
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await api<SsoConfig>("/api/sso", {
+        method: "PUT",
+        json: { ...cfg, client_secret: secret ? secret : undefined },
+      });
+      setCfg(saved);
+      setSecret("");
+      notify(saved.enabled ? `Sign-in with ${saved.label} is on.` : "Single sign-on settings saved.", { tone: "success" });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setError(null);
+    try {
+      const r = await api<{ issuer: string }>("/api/sso/test", { method: "POST", json: { issuer: cfg!.issuer, verify_tls: cfg!.verify_tls } });
+      notify(`Reached ${r.issuer}.`, { tone: "success" });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  return (
+    <form className="card stack sso-form" onSubmit={save} aria-labelledby="sso-title">
+      <h2 id="sso-title">Single sign-on</h2>
+      <details className="small">
+        <summary>How to set it up in authentik</summary>
+        <ol className="steps">
+          <li>
+            In authentik, go to <b>Applications → Providers → Create</b> and choose <b>OAuth2/OpenID Provider</b>.
+          </li>
+          <li>
+            Set <b>Client type</b> to Confidential, add the redirect URI below (Strict), and pick a <b>Signing key</b>.
+          </li>
+          <li>
+            Create an <b>Application</b> that uses this provider. Bind users or groups to it to control who can sign in.
+          </li>
+          <li>
+            Copy the provider's <b>Client ID</b>, <b>Client Secret</b> and <b>OpenID Configuration Issuer</b> into the
+            fields here.
+          </li>
+        </ol>
+      </details>
+      <label>
+        Redirect URI (paste into authentik)
+        <div className="row nowrap">
+          <input className="grow copy-field" readOnly value={redirectUri} onFocus={(e) => e.target.select()} />
+          <button
+            type="button"
+            className="small secondary"
+            onClick={() => navigator.clipboard?.writeText(redirectUri).then(() => notify("Copied."))}
+          >
+            Copy
+          </button>
+        </div>
+      </label>
+      <label>
+        HomeSlice address
+        <input value={cfg.base_url} onChange={(e) => set({ base_url: e.target.value })} inputMode="url" placeholder="https://10.69.69.12:8443" />
+        <span className="muted small">The address people open HomeSlice by. It must match the redirect URI in authentik.</span>
+      </label>
+      <label>
+        OpenID Configuration Issuer
+        <input
+          value={cfg.issuer}
+          onChange={(e) => set({ issuer: e.target.value })}
+          inputMode="url"
+          placeholder="https://auth.example.com/application/o/homeslice/"
+        />
+      </label>
+      <div className="form-grid">
+        <label>
+          Client ID
+          <input value={cfg.client_id} onChange={(e) => set({ client_id: e.target.value })} autoComplete="off" />
+        </label>
+        <label>
+          Client secret
+          <input
+            type="password"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            autoComplete="new-password"
+            placeholder={cfg.has_secret ? "Saved (leave blank to keep)" : ""}
+          />
+        </label>
+      </div>
+      <label>
+        Button text: “Sign in with …”
+        <input value={cfg.label} onChange={(e) => set({ label: e.target.value })} maxLength={40} />
+      </label>
+      <label className="row check">
+        <input type="checkbox" checked={cfg.create_users} onChange={(e) => set({ create_users: e.target.checked })} />
+        Create a HomeSlice account the first time someone signs in
+      </label>
+      {cfg.create_users && (
+        <RolePicker
+          label="Roles for new accounts (when no group below matches)"
+          roles={roles}
+          value={cfg.default_roles}
+          onChange={(v) => set({ default_roles: v })}
+        />
+      )}
+      <fieldset className="perm-group">
+        <legend>Roles from authentik groups</legend>
+        <p className="muted small users-intro">
+          When set, people's roles follow their authentik groups every time they sign in. Leave empty to manage roles
+          here instead.
+        </p>
+        {cfg.group_roles.map((m, i) => (
+          <div key={i} className="group-role">
+            <input
+              aria-label={`Group ${i + 1}`}
+              placeholder="authentik group name"
+              value={m.group}
+              onChange={(e) => set({ group_roles: cfg.group_roles.map((x, j) => (j === i ? { ...x, group: e.target.value } : x)) })}
+            />
+            <select
+              aria-label={`Role for group ${i + 1}`}
+              value={m.role}
+              onChange={(e) => set({ group_roles: cfg.group_roles.map((x, j) => (j === i ? { ...x, role: Number(e.target.value) } : x)) })}
+            >
+              {roles.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="icon-button secondary"
+              aria-label={`Remove group ${m.group || i + 1}`}
+              onClick={() => set({ group_roles: cfg.group_roles.filter((_, j) => j !== i) })}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="small secondary"
+          onClick={() => set({ group_roles: [...cfg.group_roles, { group: "", role: roles.find((r) => r.name === "Maker")?.id ?? roles[0].id }] })}
+        >
+          Add group
+        </button>
+      </fieldset>
+      <details className="small">
+        <summary>Advanced</summary>
+        <div className="stack">
+          <label className="row check">
+            <input type="checkbox" checked={cfg.link_existing} onChange={(e) => set({ link_existing: e.target.checked })} />
+            Link to existing HomeSlice accounts with the same username
+          </label>
+          <p className="muted small users-intro">
+            Only turn this on if usernames in authentik can't be chosen freely; otherwise someone could take over an
+            account by picking its name. Linked accounts keep their HomeSlice password too.
+          </p>
+          <label>
+            Username claim
+            <input value={cfg.username_claim} onChange={(e) => set({ username_claim: e.target.value })} />
+          </label>
+          <label className="row check">
+            <input type="checkbox" checked={cfg.verify_tls} onChange={(e) => set({ verify_tls: e.target.checked })} />
+            Verify authentik's HTTPS certificate
+          </label>
+          {!cfg.verify_tls && (
+            <p className="warn-inline small users-intro">
+              Only for a self-signed certificate on your own network: anyone who can intercept that traffic could sign
+              in as anyone.
+            </p>
+          )}
+        </div>
+      </details>
+      <label className="row check">
+        <input type="checkbox" checked={cfg.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+        Show “Sign in with {cfg.label || "authentik"}” on the sign-in page
+      </label>
+      {error && <p className="error">{error}</p>}
+      <div className="row end">
+        <button type="button" className="small secondary" onClick={test} disabled={!cfg.issuer}>
+          Test connection
+        </button>
+        <button className="small" disabled={busy}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </form>
   );
 }

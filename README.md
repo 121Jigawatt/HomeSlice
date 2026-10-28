@@ -20,7 +20,7 @@ Volumes: `/config` holds OrcaSlicer presets, the database, the secret key and th
 2. Go to **Apps → Discover Apps → ⋮ → Install via YAML** and paste [deploy/truenas/docker-compose.yaml](deploy/truenas/docker-compose.yaml). Storage is created automatically in the apps pool's `ix-apps` dataset. To use your own datasets instead, replace the two named volumes with host paths.
 3. Open the app logs and copy the **setup token** line. Then browse to `https://<nas>:8443`, accept the certificate warning, and create your admin account.
 4. OrcaSlicer (stable channel) is downloaded and installed automatically on first start. Progress and the installed version are shown under **Settings**, where you can also switch channels or roll back.
-5. Open **Advanced: full OrcaSlicer** once to import or create your printer, filament and process presets. They then appear on the **Slice** page. The Library page shows a checklist until this is all done.
+5. Open **Settings → OrcaSlicer engine → Open full OrcaSlicer** once to import or create your printer, filament and process presets. They then appear on the **Slice** page. The Library page shows a checklist until this is all done.
 
 ### HTTPS certificate and installing as an app
 
@@ -54,6 +54,16 @@ The setup account is an **Admin**. Under **Settings → Users**, admins add peop
 | Viewer | Browse the library and see printers. |
 
 **Settings → Roles** lets admins edit these or create their own from 14 permissions. People without "See everyone's jobs" only see the jobs they started. The full OrcaSlicer desktop has its own permission, because it can edit profiles and read the app's files. HomeSlice refuses changes that would leave nobody able to manage users. Disabling a user or resetting their password signs them out everywhere.
+
+### Single sign-on (authentik)
+
+HomeSlice signs people in with OpenID Connect (authorization code flow with PKCE).
+
+1. In authentik, create an **OAuth2/OpenID Provider**: client type Confidential, a signing key, and the redirect URI shown under **Settings → Single sign-on** (`https://<homeslice>/api/auth/oidc/callback`). Create an **Application** for it and bind the users or groups who may sign in.
+2. In HomeSlice, enter the provider's **OpenID Configuration Issuer**, client ID and client secret, then turn it on. The sign-in page then shows **Sign in with authentik**; password sign-in keeps working.
+3. New people get an account on first sign-in (optional), with roles from authentik groups you map to HomeSlice roles, or a default role. With group mappings set, roles follow authentik at every sign-in.
+
+Existing HomeSlice accounts are only linked to an authentik identity of the same username if you allow it under **Advanced**. The client secret is encrypted at rest.
 
 ## Security model
 

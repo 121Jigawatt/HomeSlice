@@ -1,5 +1,5 @@
-import { FormEvent, useState } from "react";
-import { api, setCsrfToken } from "../api";
+import { FormEvent, useEffect, useState } from "react";
+import { api, AuthStatus, setCsrfToken } from "../api";
 
 function safeNext(): string | null {
   const next = new URLSearchParams(window.location.search).get("next");
@@ -7,11 +7,19 @@ function safeNext(): string | null {
   return next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : null;
 }
 
-export function LoginPage({ onDone }: { onDone: () => void }) {
+export function LoginPage({ onDone, sso }: { onDone: () => void; sso: AuthStatus["sso"] }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => new URLSearchParams(window.location.search).get("sso_error"));
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("sso_error")) return;
+    params.delete("sso_error");
+    const rest = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""));
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -37,6 +45,19 @@ export function LoginPage({ onDone }: { onDone: () => void }) {
   return (
     <form className="center card stack" onSubmit={submit}>
       <h1>HomeSlice</h1>
+      {sso?.enabled && (
+        <>
+          <a
+            className="button"
+            href={`/api/auth/oidc/login?next=${encodeURIComponent(safeNext() ?? window.location.pathname)}`}
+          >
+            Sign in with {sso.label}
+          </a>
+          <div className="divider small muted" role="separator">
+            or use a HomeSlice password
+          </div>
+        </>
+      )}
       <label>
         Username
         <input autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
@@ -51,8 +72,10 @@ export function LoginPage({ onDone }: { onDone: () => void }) {
           required
         />
       </label>
-      {error && <p className="error">{error}</p>}
-      <button disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+      {error && <p className="error" role="alert">{error}</p>}
+      <button disabled={busy} className={sso?.enabled ? "secondary" : undefined}>
+        {busy ? "Signing in…" : "Sign in"}
+      </button>
     </form>
   );
 }
