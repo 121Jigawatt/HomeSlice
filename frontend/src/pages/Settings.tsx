@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, OrcaStatus, Printer, PrinterStatus } from "../api";
+import { useToast } from "../toast";
 
 export default function SettingsPage({ username, onLogout }: { username: string; onLogout: () => void }) {
   return (
@@ -7,6 +8,7 @@ export default function SettingsPage({ username, onLogout }: { username: string;
       <h2>Settings</h2>
       <Printers />
       <OrcaVersions />
+      <JobCleanup />
       <PasswordForm />
       <div className="card row between">
         <span>
@@ -275,6 +277,50 @@ function OrcaVersions() {
         </details>
       )}
     </div>
+  );
+}
+
+function JobCleanup() {
+  const notify = useToast();
+  const [days, setDays] = useState(30);
+  const [includeFailed, setIncludeFailed] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  async function run(e: FormEvent) {
+    e.preventDefault();
+    const what = includeFailed ? "finished, failed and cancelled" : "finished";
+    if (!confirm(`Delete all ${what} jobs older than ${days} days, including their G-code?`)) return;
+    setBusy(true);
+    try {
+      const r = await api<{ removed: number }>("/api/jobs/cleanup", {
+        method: "POST",
+        json: { older_than_days: days, include_failed: includeFailed },
+      });
+      notify(r.removed ? `Removed ${r.removed} old job${r.removed === 1 ? "" : "s"}.` : "Nothing to clean up.", {
+        tone: "success",
+      });
+    } catch (err) {
+      notify(`Cleanup failed: ${(err as Error).message}`, { tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="card stack" onSubmit={run}>
+      <strong>Job history</strong>
+      <label>
+        Clear completed jobs older than (days)
+        <input type="number" min={0} max={3650} value={days} onChange={(e) => setDays(Number(e.target.value))} required />
+      </label>
+      <label className="row check">
+        <input type="checkbox" checked={includeFailed} onChange={(e) => setIncludeFailed(e.target.checked)} /> Include
+        failed and cancelled jobs
+      </label>
+      <button className="small secondary" disabled={busy}>
+        {busy ? "Clearing…" : "Clear old jobs"}
+      </button>
+    </form>
   );
 }
 

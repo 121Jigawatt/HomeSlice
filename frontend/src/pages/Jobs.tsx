@@ -1,8 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, Job, Printer } from "../api";
+import { api, Job, JobPage as JobPageData, Printer } from "../api";
+import { Icon, IconName } from "../icons";
 import { ModelThumb } from "../ModelThumb";
+import { displayName } from "../presetNames";
 import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinter } from "../printers";
+import { useToast } from "../toast";
 
 const ACTIVE = new Set(["queued", "running"]);
 const GcodeViewer = lazy(() => import("../viewer/GcodeViewer"));
@@ -29,10 +32,17 @@ function GcodePreview({ job }: { job: Job }) {
 }
 
 function StatusBadge({ status }: { status: Job["status"] }) {
-  return <span className={`badge ${status}`}>{status}</span>;
+  const icon: IconName = { queued: "queued", running: "printing", done: "done", failed: "error", cancelled: "offline" }[status] as IconName;
+  const label = { queued: "Queued", running: "Slicing", done: "Done", failed: "Failed", cancelled: "Cancelled" }[status];
+  return (
+    <span className={`badge ${status}`}>
+      <Icon name={icon} size={14} /> {label}
+    </span>
+  );
 }
 
 export function jobTitle(job: Job): string {
+  if (job.title) return job.title;
   const names = job.models.map((m) => m.filename ?? "(deleted model)");
   if (names.length === 0) return "Slice job";
   return names.length === 1 ? names[0] : `${names[0]} + ${names.length - 1} more`;
@@ -43,82 +53,287 @@ function JobThumb({ job, size }: { job: Job; size?: number }) {
   return m ? <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={size} /> : null;
 }
 
+const PAGE = 30;
+const STATUS_FILTERS: [string, string][] = [
+  ["", "All"],
+  ["queued,running", "In progress"],
+  ["done", "Done"],
+  ["failed", "Failed"],
+  ["cancelled", "Cancelled"],
+];
+
+function dayLabel(ts: number): string {
+  const d = new Date(ts * 1000);
+  const today = new Date();
+  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(today) - start(d)) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+}
+
 export function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [total, setTotal] = useState(0);
+  const [printersUsed, setPrintersUsed] = useState<string[]>([]);
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [printer, setPrinter] = useState("");
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [debouncedQ, setDebouncedQ] = useState("");
 
   useEffect(() => {
-    let timer: number;
-    const load = () =>
-      api<Job[]>("/api/jobs")
-        .then((j) => {
-          setJobs(j);
-          if (j.some((x) => ACTIVE.has(x.status))) timer = window.setTimeout(load, 3000);
-        })
-        .catch((e) => setError(e.message));
+    const t = window.setTimeout(() => setDebouncedQ(q.trim()), 250);
+    return () => window.clearTimeout(t);
+  }, [q]);
+
+  const query = useCallback(
+    (offset: number, limit = PAGE) => {
+      const p = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+      if (debouncedQ) p.set("q", debouncedQ);
+      if (status) p.set("status", status);
+      if (printer) p.set("printer", printer);
+      return api<JobPageData>(`/api/jobs?${p}`);
+    },
+    [debouncedQ, status, printer],
+  );
+
+  // Reload the first page on filter changes; keep refreshing while anything is in progress.
+  useEffect(() => {
+    let timer: number | undefined;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const page = await query(0, Math.max(PAGE, jobsRef.current.length));
+        if (cancelled) return;
+        setJobs(page.items);
+        setTotal(page.total);
+        setPrintersUsed(page.printers);
+        setError(null);
+        if (page.items.some((x) => ACTIVE.has(x.status))) timer = window.setTimeout(load, 3000);
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    setLoading(true);
     load();
-    return () => window.clearTimeout(timer);
-  }, []);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
+  const jobsRef = useRef<Job[]>([]);
+  jobsRef.current = jobs;
+
+  async function loadMore() {
+    try {
+      const page = await query(jobs.length);
+      setJobs((j) => [...j, ...page.items]);
+      setTotal(page.total);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  const groups: [string, Job[]][] = [];
+  for (const j of jobs) {
+    const label = dayLabel(j.created_at);
+    if (groups.length && groups[groups.length - 1][0] === label) groups[groups.length - 1][1].push(j);
+    else groups.push([label, [j]]);
+  }
+  const filtered = !!(debouncedQ || status || printer);
 
   return (
     <section className="stack">
       <h2>Jobs</h2>
       <PrinterStrip />
+      <div className="card stack filters" role="search">
+        <label>
+          Search by model name
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. benchy" />
+        </label>
+        <div className="row">
+          <label className="grow">
+            Status
+            <select value={status} onChange={(e) => setStatus(e.target.value)}>
+              {STATUS_FILTERS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grow">
+            Printer preset
+            <select value={printer} onChange={(e) => setPrinter(e.target.value)}>
+              <option value="">All printers</option>
+              {printersUsed.map((p) => (
+                <option key={p} value={p} title={p}>
+                  {displayName(p)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
       {error && <p className="error">{error}</p>}
-      {jobs.length === 0 && <p className="muted">No slicing jobs yet.</p>}
-      <ul className="list">
-        {jobs.map((j) => (
-          <li key={j.id}>
-            <Link to={`/jobs/${j.id}`} className="card row between plain">
-              <JobThumb job={j} />
-              <div className="grow">
-                <div className="title">{jobTitle(j)}</div>
-                <div className="muted small">
-                  {j.params.printer} · {j.params.process} · {new Date(j.created_at * 1000).toLocaleString()}
-                </div>
-              </div>
-              <StatusBadge status={j.status} />
-            </Link>
-          </li>
-        ))}
-      </ul>
+      {!loading && jobs.length === 0 && (
+        <div className="card empty">
+          {filtered ? (
+            <p className="muted">No jobs match these filters.</p>
+          ) : (
+            <>
+              <p>No slicing jobs yet. Pick a model and printer settings to make your first one.</p>
+              <Link className="button" to="/slice">
+                Slice a model
+              </Link>
+            </>
+          )}
+        </div>
+      )}
+      {groups.map(([label, items]) => (
+        <section key={label} className="stack" aria-label={label}>
+          <h3 className="group-head">{label}</h3>
+          <ul className="list">
+            {items.map((j) => (
+              <li key={j.id} className="card job-row">
+                <Link to={`/jobs/${j.id}`} className="row plain grow job-link">
+                  <JobThumb job={j} />
+                  <div className="grow">
+                    <div className="title">{jobTitle(j)}</div>
+                    <div className="muted small" title={`${j.params.printer} \u00b7 ${j.params.process}`}>
+                      {displayName(j.params.printer)} · {displayName(j.params.process)}
+                    </div>
+                    <div className="muted small">
+                      {new Date(j.created_at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                      {j.stats?.print_time && ` \u00b7 ${j.stats.print_time}`}
+                      {j.stats?.filament_g && ` \u00b7 ${j.stats.filament_g} g`}
+                      {j.owner && ` \u00b7 by ${j.owner}`}
+                    </div>
+                  </div>
+                  <StatusBadge status={j.status} />
+                </Link>
+                {!ACTIVE.has(j.status) && (
+                  <Link className="button small secondary" to={`/slice?from=${j.id}`} aria-label={`Re-slice ${jobTitle(j)}`}>
+                    Re-slice
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+      {jobs.length < total && (
+        <button className="secondary" onClick={loadMore}>
+          Load more ({total - jobs.length} older)
+        </button>
+      )}
     </section>
+  );
+}
+
+function ElapsedSince({ since }: { since: number | null }) {
+  const [now, setNow] = useState(Date.now() / 1000);
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  return <>{since ? formatDuration(now - since) : "\u2013"}</>;
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  queued: "Waiting in queue",
+  preparing: "Preparing presets",
+  slicing: "Slicing",
+  "arranging and slicing": "Arranging and slicing",
+  "writing output": "Writing output",
+};
+
+function LogViewer({ jobId }: { jobId: string }) {
+  const [log, setLog] = useState<string | null>(null);
+  const firstError = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    api<string>(`/api/jobs/${jobId}/log`)
+      .then(setLog)
+      .catch((e) => setLog(`Could not load log: ${e.message}`));
+  }, [jobId]);
+  useEffect(() => {
+    firstError.current?.scrollIntoView({ block: "center" });
+  }, [log]);
+  if (log === null) return <p className="muted small">Loading log…</p>;
+  const lines = (log || "(empty)").split("\n");
+  const errorIndex = lines.findIndex((l) => /error|fail|exception|not compatible|invalid/i.test(l));
+  return (
+    <pre className="log" tabIndex={0} aria-label="Slicer log">
+      {lines.map((l, i) =>
+        i === errorIndex ? (
+          <span key={i} ref={firstError} className="log-error">
+            {l + "\n"}
+          </span>
+        ) : (
+          l + "\n"
+        ),
+      )}
+    </pre>
   );
 }
 
 export function JobPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const notify = useToast();
   const [job, setJob] = useState<Job | null>(null);
-  const [log, setLog] = useState<string | null>(null);
+  const [showLog, setShowLog] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let timer: number;
+    let cancelled = false;
     const load = () =>
       api<Job>(`/api/jobs/${id}`)
         .then((j) => {
+          if (cancelled) return;
           setJob(j);
-          if (ACTIVE.has(j.status)) timer = window.setTimeout(load, 2000);
+          if (ACTIVE.has(j.status)) timer = window.setTimeout(load, 1500);
         })
-        .catch((e) => setError(e.message));
+        .catch((e) => !cancelled && setError(e.message));
     load();
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [id]);
 
   if (error) return <p className="error">{error}</p>;
   if (!job) return <p className="muted">Loading…</p>;
 
   async function cancel() {
-    await api(`/api/jobs/${id}/cancel`, { method: "POST" }).catch((e) => setError(e.message));
+    await api(`/api/jobs/${id}/cancel`, { method: "POST" })
+      .then(() => notify("Slice cancelled."))
+      .catch((e) => setError(e.message));
+  }
+
+  async function retry() {
+    try {
+      const r = await api<{ id: string }>(`/api/jobs/${id}/retry`, { method: "POST" });
+      notify("Retrying with the same settings.");
+      navigate(`/jobs/${r.id}`);
+    } catch (e) {
+      notify(`Retry failed: ${(e as Error).message}`, { tone: "error" });
+    }
   }
 
   async function remove() {
-    if (!confirm("Delete this job and its output?")) return;
+    if (!confirm(`Delete the job for ${jobTitle(job!)} and its output?`)) return;
     await api(`/api/jobs/${id}`, { method: "DELETE" });
     navigate("/jobs");
   }
 
+  const info = job.error_info;
   return (
     <section className="stack">
       <div className="row between">
@@ -129,20 +344,63 @@ export function JobPage() {
         <JobThumb job={job} size={96} />
         <div className="grow stack small">
           <div className="title">{jobTitle(job)}</div>
-          <div>Printer: {job.params.printer}</div>
-          <div>Process: {job.params.process}</div>
-          <div>Filaments: {job.params.filaments.join(", ")}</div>
+          <div title={job.params.printer}>Printer: {displayName(job.params.printer)}</div>
+          <div title={job.params.process}>Process: {displayName(job.params.process)}</div>
+          <div>Filaments: {job.params.filaments.map(displayName).join(", ")}</div>
+          {job.owner && <div className="muted">Sliced by {job.owner}</div>}
         </div>
       </div>
       {ACTIVE.has(job.status) && (
-        <div className="card row between">
-          <span>Slicing…</span>
+        <div className="card stack" aria-live="polite">
+          <div className="row between">
+            <strong>{STAGE_LABELS[job.stage ?? job.status] ?? job.stage ?? "Working"}…</strong>
+            <span className="muted small">
+              {job.status === "running" ? <ElapsedSince since={job.started_at} /> : null}
+            </span>
+          </div>
+          <div className="progress-bar indeterminate" role="progressbar" aria-label="Slicing in progress">
+            <span />
+          </div>
           <button className="small secondary" onClick={cancel}>
-            Cancel
+            Cancel slice
           </button>
         </div>
       )}
-      {job.error && <p className="error">{job.error}</p>}
+      {job.status === "failed" && info && (
+        <div className="card stack error-card" role="alert">
+          <strong>
+            <Icon name="error" /> {info.title}
+          </strong>
+          <p className="small">
+            <b>Likely cause:</b> {info.cause}
+          </p>
+          <p className="small">
+            <b>Try:</b> {info.fix}
+          </p>
+          <div className="row">
+            <button onClick={retry}>Retry</button>
+            <Link className="button secondary" to={`/slice?from=${job.id}`}>
+              Edit settings and re-slice
+            </Link>
+          </div>
+          <details onToggle={(e) => setShowLog((e.target as HTMLDetailsElement).open)}>
+            <summary>Technical details</summary>
+            <p className="small muted">
+              {info.code != null && <>Code {info.code} · </>}
+              {info.raw}
+            </p>
+            {showLog && <LogViewer jobId={job.id} />}
+          </details>
+        </div>
+      )}
+      {job.status === "cancelled" && (
+        <div className="card row between">
+          <span className="muted">This slice was cancelled.</span>
+          <button className="small" onClick={retry}>
+            Slice again
+          </button>
+        </div>
+      )}
       {job.stats && (
         <div className="card stack small">
           {job.stats.print_time && <div>Print time: {job.stats.print_time}</div>}
@@ -163,22 +421,30 @@ export function JobPage() {
       )}
       {job.status === "done" && <GcodePreview job={job} />}
       {job.status === "done" && <SendToPrinter job={job} />}
-      <div className="row">
-        <button className="small secondary" onClick={() => api<string>(`/api/jobs/${id}/log`).then(setLog)}>
-          Show log
-        </button>
+      {job.status !== "failed" && !ACTIVE.has(job.status) && (
+        <details className="card">
+          <summary>Technical details</summary>
+          <LogViewer jobId={job.id} />
+        </details>
+      )}
+      <div className="row between">
+        {!ACTIVE.has(job.status) && (
+          <Link className="button small secondary" to={`/slice?from=${job.id}`}>
+            Re-slice with these settings
+          </Link>
+        )}
         {!ACTIVE.has(job.status) && (
           <button className="small danger" onClick={remove}>
-            Delete
+            Delete job
           </button>
         )}
       </div>
-      {log !== null && <pre className="log">{log || "(empty)"}</pre>}
     </section>
   );
 }
 
 function SendToPrinter({ job }: { job: Job }) {
+  const notify = useToast();
   const gcodes = job.files.filter((f) => f.endsWith(".gcode"));
   const [printers, setPrinters] = useState<Printer[] | null>(null);
   const [printerId, setPrinterId] = useState(() => localStorage.getItem("send.printer") ?? "");
@@ -223,8 +489,10 @@ function SendToPrinter({ job }: { job: Job }) {
         json: { printer_id: printerId, file, start: startNow },
       });
       setMsg({ ok: true, text: r.print_started ? `Printing on ${r.printer}.` : `Uploaded to ${r.printer} as ${r.filename}.` });
+      notify(r.print_started ? `Print started on ${r.printer}.` : `Sent to ${r.printer}.`, { tone: "success" });
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message });
+      notify(`Send failed: ${(e as Error).message}`, { tone: "error" });
     } finally {
       setBusy(false);
     }

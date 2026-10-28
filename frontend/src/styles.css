@@ -110,6 +110,32 @@ progress { width: 100%; }
 .viewer.placeholder { display: flex; align-items: center; justify-content: center; }
 input[type="range"] { padding: 0; accent-color: var(--accent); }
 
+.toasts { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 4.5rem); z-index: 20; display: flex; flex-direction: column; gap: 0.5rem; width: min(30rem, calc(100% - 1.5rem)); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem; border-radius: 10px; background: #1b2740; border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); font-size: 0.9rem; }
+.toast.success { border-color: #0f766e; }
+.toast.error { border-color: var(--danger); }
+.toast-action { color: var(--accent); font-weight: 600; background: none; border: 0; padding: 0.25rem 0.4rem; text-decoration: none; cursor: pointer; font: inherit; }
+.toast-close { background: none; border: 0; color: var(--muted); padding: 0.25rem; cursor: pointer; }
+
+.recap { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0; }
+.recap dt { color: var(--muted); }
+.recap dd { margin: 0; overflow-wrap: anywhere; }
+.blockers { border-left: 3px solid #f59e0b; padding-left: 0.6rem; }
+.blockers ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
+
+.group-head { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0.5rem 0 0; }
+.job-row { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; }
+.job-link { gap: 0.6rem; min-width: 0; flex: 1 1 100%; }
+.empty { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.75rem; }
+.empty p { margin: 0; }
+.error-card { border-color: var(--danger); }
+.error-card p { margin: 0; }
+.log-error { background: rgba(239, 68, 68, 0.2); color: #fecaca; display: block; }
+details summary { cursor: pointer; padding: 0.35rem 0; }
+.progress-bar.indeterminate > span { width: 35%; animation: slide 1.4s ease-in-out infinite; }
+@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) { .progress-bar.indeterminate > span { animation: none; width: 100%; opacity: 0.5; } }
+
 .preview-main { width: 100%; max-height: 50vh; object-fit: contain; border-radius: 8px; background: var(--bg); }
 .thumbs { flex-wrap: nowrap; overflow-x: auto; }
 .thumb { padding: 0; background: none; border: 2px solid transparent; border-radius: 6px; flex: 0 0 auto; }

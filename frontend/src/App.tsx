@@ -7,6 +7,8 @@ import SlicePage from "./pages/Slice";
 import { JobPage, JobsPage } from "./pages/Jobs";
 import SettingsPage from "./pages/Settings";
 import { PrinterProvider } from "./printers";
+import { JobWatcher } from "./jobWatcher";
+import { ToastProvider } from "./toast";
 
 export default function App() {
   const location = useLocation();
@@ -38,7 +40,9 @@ export default function App() {
   if (location.pathname === "/orca") return <FullOrca />;
 
   return (
+    <ToastProvider>
     <PrinterProvider>
+    <JobWatcher />
     <div className="app">
       <header className="topbar">
         <span className="brand">HomeSlice</span>
@@ -66,6 +70,7 @@ export default function App() {
       </nav>
     </div>
     </PrinterProvider>
+    </ToastProvider>
   );
 }
 

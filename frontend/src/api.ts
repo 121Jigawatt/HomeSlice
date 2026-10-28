@@ -95,16 +95,44 @@ export interface Preset {
   inherits: string | null;
 }
 
+export interface ErrorInfo {
+  title: string;
+  cause: string;
+  fix: string;
+  code: number | null;
+  raw: string | null;
+}
+
 export interface Job {
   id: string;
   status: "queued" | "running" | "done" | "failed" | "cancelled";
+  stage: string | null;
+  title: string | null;
+  owner: string | null;
   error: string | null;
+  error_info: ErrorInfo | null;
   stats: Record<string, string> | null;
-  params: { model_ids: string[]; printer: string; process: string; filaments: string[] };
+  params: {
+    model_ids: string[];
+    printer: string;
+    process: string;
+    filaments: string[];
+    overrides?: Record<string, string>;
+    arrange?: boolean;
+    orient?: boolean;
+  };
   models: { id: string; filename: string | null; has_thumbnail: boolean }[];
   files: string[];
   created_at: number;
+  started_at: number | null;
   finished_at: number | null;
+  duration: number | null;
+}
+
+export interface JobPage {
+  items: Job[];
+  total: number;
+  printers: string[];
 }
 
 export interface Printer {
