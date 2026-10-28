@@ -1,6 +1,8 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, formatBytes, ImportPreview, Model, uploadModel } from "../api";
+import { ModelThumb } from "../ModelThumb";
+import { PrinterStrip } from "../printers";
 
 export default function LibraryPage() {
   const [models, setModels] = useState<Model[]>([]);
@@ -11,6 +13,16 @@ export default function LibraryPage() {
   useEffect(() => {
     load();
   }, []);
+
+  // Thumbnails render in the background; refresh while recent previewable uploads still lack one.
+  const pendingThumbs = models.some(
+    (m) => !m.has_thumbnail && [".stl", ".3mf", ".obj"].includes(m.ext) && Date.now() / 1000 - m.created_at < 600,
+  );
+  useEffect(() => {
+    if (!pendingThumbs) return;
+    const t = window.setTimeout(load, 3000);
+    return () => window.clearTimeout(t);
+  }, [models, pendingThumbs]);
 
   async function onFiles(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -43,6 +55,7 @@ export default function LibraryPage() {
           <input type="file" accept=".stl,.3mf,.obj,.step,.stp,.amf" multiple hidden onChange={onFiles} />
         </label>
       </div>
+      <PrinterStrip />
       {uploading && (
         <div className="card">
           Uploading {uploading.name}… {uploading.pct}%
@@ -55,6 +68,7 @@ export default function LibraryPage() {
       <ul className="list">
         {models.map((m) => (
           <li key={m.id} className="card row between">
+            <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={64} />
             <div className="grow">
               <div className="title">{m.filename}</div>
               <div className="muted small">

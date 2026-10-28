@@ -6,6 +6,7 @@ import LibraryPage from "./pages/Library";
 import SlicePage from "./pages/Slice";
 import { JobPage, JobsPage } from "./pages/Jobs";
 import SettingsPage from "./pages/Settings";
+import { PrinterProvider } from "./printers";
 
 export default function App() {
   const location = useLocation();
@@ -37,6 +38,7 @@ export default function App() {
   if (location.pathname === "/orca") return <FullOrca />;
 
   return (
+    <PrinterProvider>
     <div className="app">
       <header className="topbar">
         <span className="brand">HomeSlice</span>
@@ -63,6 +65,7 @@ export default function App() {
         <NavLink to="/settings">Settings</NavLink>
       </nav>
     </div>
+    </PrinterProvider>
   );
 }
 

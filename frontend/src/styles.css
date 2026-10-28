@@ -78,6 +78,33 @@ button.small, .button.small { font-size: 0.85rem; }
 
 progress { width: 100%; }
 
+.icon { display: inline-block; vertical-align: -0.15em; flex: 0 0 auto; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.badge { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
+.badge.warn { background: #78350f; color: #fde68a; }
+
+.model-thumb { border-radius: 8px; background: var(--bg); object-fit: contain; flex: 0 0 auto; }
+.model-thumb.placeholder { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); border: 1px solid var(--border); }
+
+.printer-strip { margin: 0; }
+.printer-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr)); }
+.printer-card {
+  min-width: 0;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 0.6rem 0.75rem;
+  display: flex; flex-direction: column; gap: 0.35rem;
+}
+.printer-card.open { grid-column: 1 / -1; }
+.printer-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; width: 100%; padding: 0; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.printer-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.printer-job .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.progress-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin: 0.25rem 0; }
+.progress-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.5s; }
+.webcam { margin: 0; }
+.webcam img { width: 100%; border-radius: 8px; background: #000; display: block; min-height: 120px; }
+.webcam figcaption { margin-top: 0.35rem; }
+.confirm-box { border: 1px solid var(--accent); border-radius: 10px; padding: 0.75rem; background: rgba(20, 184, 166, 0.08); }
+.confirm-box p { margin: 0; }
+
 .preview-main { width: 100%; max-height: 50vh; object-fit: contain; border-radius: 8px; background: var(--bg); }
 .thumbs { flex-wrap: nowrap; overflow-x: auto; }
 .thumb { padding: 0; background: none; border: 2px solid transparent; border-radius: 6px; flex: 0 0 auto; }

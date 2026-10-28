@@ -85,6 +85,7 @@ export interface Model {
   created_at: number;
   source_url: string | null;
   license: string | null;
+  has_thumbnail: boolean;
 }
 
 export interface Preset {
@@ -100,6 +101,7 @@ export interface Job {
   error: string | null;
   stats: Record<string, string> | null;
   params: { model_ids: string[]; printer: string; process: string; filaments: string[] };
+  models: { id: string; filename: string | null; has_thumbnail: boolean }[];
   files: string[];
   created_at: number;
   finished_at: number | null;
@@ -120,6 +122,28 @@ export interface PrinterStatus {
   progress: number | null;
   message: string | null;
   address: string | null;
+}
+
+export interface Temps {
+  temp: number | null;
+  target: number | null;
+}
+
+export interface LivePrinter {
+  id: string;
+  name: string;
+  connected: boolean;
+  error: string | null;
+  state: string;
+  filename?: string | null;
+  message?: string | null;
+  progress?: number | null;
+  elapsed?: number | null;
+  remaining?: number | null;
+  extruder?: Temps | null;
+  bed?: Temps | null;
+  address?: string | null;
+  webcams: string[];
 }
 
 export interface ImportFile {

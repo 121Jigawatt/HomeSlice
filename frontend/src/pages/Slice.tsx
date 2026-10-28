@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, Model, Preset } from "../api";
+import { ModelThumb } from "../ModelThumb";
+import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinters } from "../printers";
 
 type Kind = "printer" | "process" | "filament";
 
@@ -34,6 +36,9 @@ export default function SlicePage() {
   const [orient, setOrient] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { printers: machines } = useLivePrinters();
+  const [target, setTarget] = useState(() => localStorage.getItem("send.printer") ?? "");
+  const machine = machines?.find((m) => m.id === target) ?? machines?.[0];
 
   useEffect(() => {
     api<Model[]>("/api/library").then(setModels).catch((e) => setError(e.message));
@@ -94,6 +99,7 @@ export default function SlicePage() {
   return (
     <form className="stack" onSubmit={submit}>
       <h2>Slice</h2>
+      <PrinterStrip />
 
       <fieldset className="card stack">
         <legend>Models</legend>
@@ -101,10 +107,48 @@ export default function SlicePage() {
         {models.map((m) => (
           <label key={m.id} className="row check">
             <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} />
+            <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={40} />
             {m.filename}
           </label>
         ))}
       </fieldset>
+
+      {machines && machines.length > 0 && (
+        <fieldset className="card stack">
+          <legend>Target printer</legend>
+          <label>
+            Printer to send to after slicing
+            <select
+              value={machine?.id ?? ""}
+              onChange={(e) => {
+                setTarget(e.target.value);
+                localStorage.setItem("send.printer", e.target.value);
+              }}
+            >
+              {machines.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {machine && (
+            <div className="row small" aria-live="polite">
+              <PrinterBadge state={machine.state} />
+              {machine.state === "printing" || machine.state === "paused" ? (
+                <span className="muted">
+                  Busy with {machine.filename} · {formatDuration(machine.remaining)} left. You can slice now and send
+                  when it's free.
+                </span>
+              ) : IDLE_STATES.has(machine.state) ? (
+                <span className="muted">Free to print.</span>
+              ) : (
+                <span className="muted">{machine.error ?? machine.message ?? "Check the printer before sending."}</span>
+              )}
+            </div>
+          )}
+        </fieldset>
+      )}
 
       <fieldset className="card stack">
         <legend>Profiles</legend>

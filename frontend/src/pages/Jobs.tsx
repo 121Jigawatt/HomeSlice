@@ -1,11 +1,24 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, Job, Printer, PrinterStatus } from "../api";
+import { api, Job, Printer } from "../api";
+import { ModelThumb } from "../ModelThumb";
+import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinter } from "../printers";
 
 const ACTIVE = new Set(["queued", "running"]);
 
 function StatusBadge({ status }: { status: Job["status"] }) {
   return <span className={`badge ${status}`}>{status}</span>;
+}
+
+export function jobTitle(job: Job): string {
+  const names = job.models.map((m) => m.filename ?? "(deleted model)");
+  if (names.length === 0) return "Slice job";
+  return names.length === 1 ? names[0] : `${names[0]} + ${names.length - 1} more`;
+}
+
+function JobThumb({ job, size }: { job: Job; size?: number }) {
+  const m = job.models[0];
+  return m ? <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={size} /> : null;
 }
 
 export function JobsPage() {
@@ -28,16 +41,18 @@ export function JobsPage() {
   return (
     <section className="stack">
       <h2>Jobs</h2>
+      <PrinterStrip />
       {error && <p className="error">{error}</p>}
       {jobs.length === 0 && <p className="muted">No slicing jobs yet.</p>}
       <ul className="list">
         {jobs.map((j) => (
           <li key={j.id}>
             <Link to={`/jobs/${j.id}`} className="card row between plain">
+              <JobThumb job={j} />
               <div className="grow">
-                <div className="title">{j.params.printer}</div>
+                <div className="title">{jobTitle(j)}</div>
                 <div className="muted small">
-                  {j.params.process} · {new Date(j.created_at * 1000).toLocaleString()}
+                  {j.params.printer} · {j.params.process} · {new Date(j.created_at * 1000).toLocaleString()}
                 </div>
               </div>
               <StatusBadge status={j.status} />
@@ -88,10 +103,14 @@ export function JobPage() {
         <h2>Job</h2>
         <StatusBadge status={job.status} />
       </div>
-      <div className="card stack small">
-        <div>Printer: {job.params.printer}</div>
-        <div>Process: {job.params.process}</div>
-        <div>Filaments: {job.params.filaments.join(", ")}</div>
+      <div className="card row">
+        <JobThumb job={job} size={96} />
+        <div className="grow stack small">
+          <div className="title">{jobTitle(job)}</div>
+          <div>Printer: {job.params.printer}</div>
+          <div>Process: {job.params.process}</div>
+          <div>Filaments: {job.params.filaments.join(", ")}</div>
+        </div>
       </div>
       {ACTIVE.has(job.status) && (
         <div className="card row between">
@@ -141,10 +160,12 @@ function SendToPrinter({ job }: { job: Job }) {
   const [printers, setPrinters] = useState<Printer[] | null>(null);
   const [printerId, setPrinterId] = useState(() => localStorage.getItem("send.printer") ?? "");
   const [file, setFile] = useState(gcodes[0] ?? "");
-  const [state, setState] = useState<string | null>(null);
   const [start, setStart] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const live = useLivePrinter(printerId);
+  const canStart = !!live && live.connected && IDLE_STATES.has(live.state);
 
   useEffect(() => {
     api<Printer[]>("/api/printers")
@@ -155,13 +176,10 @@ function SendToPrinter({ job }: { job: Job }) {
       .catch((e) => setMsg({ ok: false, text: e.message }));
   }, []);
 
+  // A printer that becomes busy while confirming must not receive a start.
   useEffect(() => {
-    setState(null);
-    if (!printerId) return;
-    api<PrinterStatus>(`/api/printers/${printerId}/status`)
-      .then((s) => setState(s.state))
-      .catch((e) => setState(`offline: ${e.message}`));
-  }, [printerId]);
+    if (!canStart) setConfirming(false);
+  }, [canStart]);
 
   if (gcodes.length === 0 || printers === null) return null;
   if (printers.length === 0)
@@ -171,14 +189,15 @@ function SendToPrinter({ job }: { job: Job }) {
       </p>
     );
 
-  async function send() {
+  async function send(startNow: boolean) {
     setBusy(true);
     setMsg(null);
+    setConfirming(false);
     localStorage.setItem("send.printer", printerId);
     try {
       const r = await api<{ printer: string; filename: string; print_started: boolean }>(`/api/jobs/${job.id}/send`, {
         method: "POST",
-        json: { printer_id: printerId, file, start },
+        json: { printer_id: printerId, file, start: startNow },
       });
       setMsg({ ok: true, text: r.print_started ? `Printing on ${r.printer}.` : `Uploaded to ${r.printer} as ${r.filename}.` });
     } catch (e) {
@@ -187,6 +206,16 @@ function SendToPrinter({ job }: { job: Job }) {
       setBusy(false);
     }
   }
+
+  const blockedReason = !live
+    ? "Checking printer…"
+    : !live.connected
+      ? `Printer is offline: ${live.error ?? "unreachable"}`
+      : live.state === "printing" || live.state === "paused"
+        ? `Printer is busy (${live.state}${live.filename ? `: ${live.filename}` : ""}).`
+        : live.state === "error"
+          ? `Printer reports an error${live.message ? `: ${live.message}` : ""}. Fix it on the printer first.`
+          : null;
 
   return (
     <div className="card stack">
@@ -201,7 +230,12 @@ function SendToPrinter({ job }: { job: Job }) {
           ))}
         </select>
       </label>
-      <div className="muted small">Status: {state ?? "checking…"}</div>
+      <div className="row small" aria-live="polite">
+        Status: {live ? <PrinterBadge state={live.state} /> : "checking…"}
+        {live?.state === "printing" && live.remaining != null && (
+          <span className="muted">{formatDuration(live.remaining)} left</span>
+        )}
+      </div>
       {gcodes.length > 1 && (
         <label>
           File
@@ -213,15 +247,44 @@ function SendToPrinter({ job }: { job: Job }) {
         </label>
       )}
       <label className="row check">
-        <input type="checkbox" checked={start} onChange={(e) => setStart(e.target.checked)} /> Start printing now
+        <input
+          type="checkbox"
+          checked={start && canStart}
+          disabled={!canStart}
+          onChange={(e) => setStart(e.target.checked)}
+          aria-describedby="start-blocked"
+        />{" "}
+        Start printing now
       </label>
+      {blockedReason && (
+        <p id="start-blocked" className="muted small">
+          {blockedReason} You can still upload the file without starting it.
+        </p>
+      )}
       {msg && <p className={msg.ok ? "muted" : "error"}>{msg.text}</p>}
-      <button
-        disabled={busy || !printerId || !file}
-        onClick={() => (!start || confirm("Start printing now? Make sure the bed is clear.")) && send()}
-      >
-        {busy ? "Sending…" : start ? "Send & print" : "Send"}
-      </button>
+      {confirming ? (
+        <div className="confirm-box stack" role="alertdialog" aria-labelledby="confirm-start-title">
+          <strong id="confirm-start-title">Start printing on {live?.name}?</strong>
+          <p className="small">
+            The printer will home and heat immediately. Make sure the bed is clear and the right filament is loaded.
+          </p>
+          <div className="row">
+            <button onClick={() => send(true)} disabled={busy || !canStart} autoFocus>
+              Yes, start printing
+            </button>
+            <button className="secondary" onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          disabled={busy || !printerId || !file || !live?.connected}
+          onClick={() => (start && canStart ? setConfirming(true) : send(false))}
+        >
+          {busy ? "Sending…" : start && canStart ? "Send & print…" : "Upload to printer"}
+        </button>
+      )}
     </div>
   );
 }
