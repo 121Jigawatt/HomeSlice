@@ -41,12 +41,19 @@ export default function App() {
       <div className="center card stack" role="alert">
         <h1>Can't reach HomeSlice</h1>
         <p className="muted">
-          {navigator.onLine
-            ? "The server didn't answer. It may be restarting or updating; try again in a moment."
-            : "This device is offline. Reconnect to your home network and try again."}
+          {!navigator.onLine
+            ? "This device is offline. Reconnect to your home network and try again."
+            : window.location.protocol === "https:"
+              ? "The server didn't answer. If HomeSlice was just updated, its security certificate may have changed: reload the page and accept the browser's warning again (or install the HomeSlice certificate). Otherwise it may still be starting up."
+              : "The server didn't answer. It may be restarting or updating; try again in a moment."}
         </p>
         <p className="muted small">Details: {error}</p>
-        <button onClick={refresh}>Try again</button>
+        <div className="row">
+          <button onClick={() => window.location.reload()}>Reload page</button>
+          <button className="secondary" onClick={refresh}>
+            Try again
+          </button>
+        </div>
       </div>
     );
   if (!status) return <div className="center muted">Loading…</div>;

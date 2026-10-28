@@ -20,7 +20,11 @@ export function registerServiceWorker(): void {
   }
   navigator.serviceWorker
     .register("/sw.js", { scope: "/" })
-    .then(() => resolveTrust("trusted"))
+    .then((reg) => {
+      resolveTrust("trusted");
+      navigator.serviceWorker.ready.then((r) => r.active?.postMessage("refresh-shell"));
+      return reg;
+    })
     .catch((e: Error) => {
       const certError = e.name === "SecurityError" || /ssl|certificate/i.test(e.message);
       resolveTrust(certError && location.protocol === "https:" ? "untrusted" : "unknown");

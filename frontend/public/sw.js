@@ -1,5 +1,5 @@
 // Offline shell: the app UI loads without a connection; all data (/api) always goes to the server.
-const CACHE = "homeslice-shell-v1";
+const CACHE = "homeslice-shell-v2";
 const SHELL = ["/manifest.webmanifest", "/icon.svg", "/icon-192.png"];
 
 // Stores index.html plus the hashed bundles it references, so the shell starts with no connection.
@@ -36,6 +36,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data === "refresh-shell") {
+    event.waitUntil(fetch("/", { cache: "no-cache" }).then((res) => res.ok && cacheShell(res)).catch(() => undefined));
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
@@ -44,7 +50,8 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/gui") || url.pathname === "/orca") return;
 
   if (req.mode === "navigate") {
-    // Network first so updates show immediately; the cached shell only when offline.
+    // While online let the browser navigate itself, so certificate warnings and server errors stay visible.
+    if (self.navigator.onLine) return;
     event.respondWith(
       fetch(req)
         .then((res) => {
