@@ -193,6 +193,17 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .orca-frame { flex: 1; width: 100%; border: 0; background: #000; }
 
 .import-go { align-self: flex-end; }
+.bed-flag {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.5rem 0.6rem; border-radius: 8px; border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.1); color: #fde68a;
+}
+.queue-printer { font-size: 1rem; margin: 0; }
+.queue-item { flex-wrap: nowrap; gap: 0.4rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+.queue-pos { flex: 0 0 1.6rem; height: 1.6rem; border-radius: 999px; background: var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 600; }
+.queue-list { gap: 0.4rem; }
+.activity li { border-bottom: 1px solid var(--border); padding: 0.4rem 0; }
+.activity .muted span { overflow-wrap: anywhere; }
+.warn-text b { color: #fca5a5; }
 .toast-close { min-height: 36px; min-width: 36px; }
 .wide-only { display: none; }
 .job-row.selected { border-color: var(--accent); }

@@ -59,6 +59,19 @@ CREATE TABLE IF NOT EXISTS printers(
     resolved_ip TEXT,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS print_queue(
+    id TEXT PRIMARY KEY,
+    printer_id TEXT NOT NULL REFERENCES printers(id) ON DELETE CASCADE,
+    job_id TEXT NOT NULL,
+    file TEXT NOT NULL,
+    position REAL NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT,
+    owner TEXT,
+    created_at REAL NOT NULL,
+    sent_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_print_queue ON print_queue(printer_id, status, position);
 """
 
 # Columns added after a table first shipped: (table, column, type).
@@ -71,6 +84,10 @@ ADDED_COLUMNS = [
     ("jobs", "started_at", "REAL"),
     ("jobs", "error_code", "INTEGER"),
     ("jobs", "error_kind", "TEXT"),
+    # 1 while the bed may still hold a finished print; blocks remote and queued starts.
+    ("printers", "needs_attention", "INTEGER NOT NULL DEFAULT 0"),
+    ("printers", "attention_reason", "TEXT"),
+    ("printers", "last_state", "TEXT"),
 ]
 
 

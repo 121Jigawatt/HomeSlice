@@ -4,7 +4,8 @@ import { api, Job, JobPage as JobPageData, Printer } from "../api";
 import { Icon, IconName } from "../icons";
 import { ModelThumb } from "../ModelThumb";
 import { displayName } from "../presetNames";
-import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinter } from "../printers";
+import { BedFlag, formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinter } from "../printers";
+import { PrintQueuePanel } from "../queue";
 import { useToast } from "../toast";
 import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
 
@@ -156,6 +157,7 @@ export function JobsPage({ compact = false }: { compact?: boolean }) {
     <section className="stack">
       {compact ? <h2>Jobs</h2> : <h1>Jobs</h1>}
       {!compact && <PrinterStrip />}
+      {!compact && <PrintQueuePanel />}
       <div className="card stack filters" role="search">
         <label>
           Search by model name
@@ -477,7 +479,7 @@ function SendToPrinter({ job }: { job: Job }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const live = useLivePrinter(printerId);
-  const canStart = !!live && live.connected && IDLE_STATES.has(live.state);
+  const canStart = !!live && live.connected && IDLE_STATES.has(live.state) && !live.needs_attention;
 
   useEffect(() => {
     api<Printer[]>("/api/printers")
@@ -521,6 +523,24 @@ function SendToPrinter({ job }: { job: Job }) {
     }
   }
 
+  async function enqueue() {
+    setBusy(true);
+    setMsg(null);
+    localStorage.setItem("send.printer", printerId);
+    try {
+      await api("/api/queue", { method: "POST", json: { job_id: job.id, printer_id: printerId, file } });
+      const name = printers?.find((p) => p.id === printerId)?.name ?? "the printer";
+      notify(`Queued for ${name}. It starts when ${name} is idle and its bed is confirmed clear.`, {
+        tone: "success",
+        action: { label: "View queue", to: "/jobs#queue" },
+      });
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const blockedReason = !live
     ? "Checking printer…"
     : !live.connected
@@ -529,7 +549,9 @@ function SendToPrinter({ job }: { job: Job }) {
         ? `Printer is busy (${live.state}${live.filename ? `: ${live.filename}` : ""}).`
         : live.state === "error"
           ? `Printer reports an error${live.message ? `: ${live.message}` : ""}. Fix it on the printer first.`
-          : null;
+          : live.needs_attention
+            ? "Confirm the bed is clear before starting."
+            : null;
 
   return (
     <div className="card stack">
@@ -550,6 +572,7 @@ function SendToPrinter({ job }: { job: Job }) {
           <span className="muted">{formatDuration(live.remaining)} left</span>
         )}
       </div>
+      {live && <BedFlag p={live} />}
       {gcodes.length > 1 && (
         <label>
           File
@@ -592,12 +615,23 @@ function SendToPrinter({ job }: { job: Job }) {
           </div>
         </div>
       ) : (
-        <button
-          disabled={busy || !printerId || !file || !live?.connected}
-          onClick={() => (start && canStart ? setConfirming(true) : send(false))}
-        >
-          {busy ? "Sending…" : start && canStart ? "Send & print…" : "Upload to printer"}
-        </button>
+        <div className="row">
+          <button
+            className="grow"
+            disabled={busy || !printerId || !file || !live?.connected}
+            onClick={() => (start && canStart ? setConfirming(true) : send(false))}
+          >
+            {busy ? "Sending…" : start && canStart ? "Send & print…" : "Upload to printer"}
+          </button>
+          <button
+            className="secondary grow"
+            disabled={busy || !printerId || !file}
+            onClick={enqueue}
+            title="Prints automatically once this printer is idle and you've confirmed its bed is clear."
+          >
+            Add to queue
+          </button>
+        </div>
       )}
     </div>
   );

@@ -172,6 +172,31 @@ export interface LivePrinter {
   bed?: Temps | null;
   address?: string | null;
   webcams: string[];
+  needs_attention: boolean;
+  attention_reason: string | null;
+}
+
+export interface QueueItem {
+  id: string;
+  printer_id: string;
+  printer_name: string;
+  job_id: string;
+  job_title: string | null;
+  file: string;
+  position: number;
+  status: "waiting" | "sending" | "sent" | "failed" | "cancelled";
+  error: string | null;
+  owner: string | null;
+  created_at: number;
+  sent_at: number | null;
+}
+
+export interface ActivityItem {
+  id: number;
+  at: number;
+  actor: string | null;
+  action: string;
+  detail: string | null;
 }
 
 export interface ImportFile {

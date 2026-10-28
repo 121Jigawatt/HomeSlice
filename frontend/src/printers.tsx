@@ -1,15 +1,18 @@
 import { createContext, ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { api, LivePrinter } from "./api";
 import { Icon, IconName } from "./icons";
+import { useToast } from "./toast";
+import { useConfirm } from "./ui";
 
 const POLL_MS = 3000;
 
-type LiveState = { printers: LivePrinter[] | null; error: string | null };
-const PrinterContext = createContext<LiveState>({ printers: null, error: null });
+type LiveState = { printers: LivePrinter[] | null; error: string | null; refresh: () => void };
+const PrinterContext = createContext<LiveState>({ printers: null, error: null, refresh: () => undefined });
 
 /** One shared poll for the whole app; paused while the tab is hidden. */
 export function PrinterProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<LiveState>({ printers: null, error: null });
+  const [state, setState] = useState<Omit<LiveState, "refresh">>({ printers: null, error: null });
+  const refreshRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     let timer: number | undefined;
@@ -26,6 +29,10 @@ export function PrinterProvider({ children }: { children: ReactNode }) {
       if (!stopped) timer = window.setTimeout(tick, POLL_MS);
     };
     tick();
+    refreshRef.current = () => {
+      window.clearTimeout(timer);
+      tick();
+    };
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         window.clearTimeout(timer);
@@ -40,7 +47,42 @@ export function PrinterProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  return <PrinterContext.Provider value={state}>{children}</PrinterContext.Provider>;
+  return (
+    <PrinterContext.Provider value={{ ...state, refresh: () => refreshRef.current() }}>{children}</PrinterContext.Provider>
+  );
+}
+
+/** Warning shown while a printer's bed may be occupied; remote and queued starts wait until it's confirmed clear. */
+export function BedFlag({ p }: { p: LivePrinter }) {
+  const { refresh } = useLivePrinters();
+  const confirm = useConfirm();
+  const notify = useToast();
+  if (!p.needs_attention) return null;
+  async function clear() {
+    const ok = await confirm({
+      title: `Is the bed on ${p.name} clear?`,
+      body: <p>Queued prints for {p.name} can start as soon as you confirm. Check that the last part is removed and nothing is in the way.</p>,
+      confirmLabel: "Bed is clear",
+    });
+    if (!ok) return;
+    try {
+      await api(`/api/printers/${p.id}/attention`, { method: "PUT", json: { needs_attention: false } });
+      notify(`${p.name} marked ready.`, { tone: "success" });
+      refresh();
+    } catch (e) {
+      notify(`Couldn't update ${p.name}: ${(e as Error).message}`, { tone: "error" });
+    }
+  }
+  return (
+    <div className="bed-flag small" role="status">
+      <span className="grow">
+        <Icon name="error" size={14} /> <b>Needs attention.</b> {p.attention_reason}
+      </span>
+      <button type="button" className="small secondary" onClick={clear}>
+        Bed is clear
+      </button>
+    </div>
+  );
 }
 
 export function useLivePrinters(): LiveState {
@@ -128,6 +170,7 @@ function PrinterCard({ p }: { p: LivePrinter }) {
           {p.error}
         </div>
       )}
+      <BedFlag p={p} />
       {open && p.connected && (
         <div className="stack small">
           {p.message && <div className="error">{p.message}</div>}

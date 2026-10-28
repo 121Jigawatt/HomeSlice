@@ -34,6 +34,13 @@ WEBCAM_TTL_S = 60.0
 # How long a verified hostname->IP mapping is trusted before re-checking /printer/info.
 VERIFY_TTL_S = 60.0
 ACTIVE_STATES = {"printing", "paused"}
+# A print that ended in one of these may still be on the bed.
+FINISHED_STATES = {"complete", "cancelled", "error"}
+FINISHED_REASON = {
+    "complete": "Print finished; the part may still be on the bed.",
+    "cancelled": "Print was cancelled; the bed may not be clear.",
+    "error": "Print stopped with an error; check the bed.",
+}
 
 
 def parse_printer_id(printer_id: str) -> str:
@@ -75,6 +82,8 @@ class Printers:
             "url": row["url"],
             "address": row["resolved_ip"],
             "has_api_key": bool(row["api_key"]),
+            "needs_attention": bool(row["needs_attention"]),
+            "attention_reason": row["attention_reason"],
             "created_at": row["created_at"],
         }
 
@@ -98,6 +107,8 @@ class Printers:
             "url": normalize_url(url),
             "api_key": self._secrets.encrypt(api_key.strip()) if api_key and api_key.strip() else None,
             "resolved_ip": None,
+            "needs_attention": 0,
+            "attention_reason": None,
             "created_at": time.time(),
         }
         self._db.execute(
@@ -111,6 +122,38 @@ class Printers:
     def delete(self, printer_id: str) -> bool:
         self._live_at = 0.0
         return self._db.execute("DELETE FROM printers WHERE id=?", (parse_printer_id(printer_id),)) > 0
+
+    def set_attention(self, printer_id: str, needed: bool, reason: str | None = None) -> bool:
+        self._live_at = 0.0
+        return (
+            self._db.execute(
+                "UPDATE printers SET needs_attention=?, attention_reason=? WHERE id=?",
+                (int(needed), reason if needed else None, parse_printer_id(printer_id)),
+            )
+            > 0
+        )
+
+    def needs_attention(self, printer_id: str) -> str | None:
+        """The reason a printer must not start a print remotely, or None."""
+        row = self._db.one(
+            "SELECT needs_attention, attention_reason FROM printers WHERE id=?", (parse_printer_id(printer_id),)
+        )
+        if row is None or not row["needs_attention"]:
+            return None
+        return row["attention_reason"] or "Marked as needing attention."
+
+    def observe_state(self, printer_id: str, state: str) -> None:
+        """Flags the printer when a print ends, so nothing starts on top of a finished part."""
+        row = self._db.one("SELECT last_state FROM printers WHERE id=?", (printer_id,))
+        if row is None or row["last_state"] == state:
+            return
+        if state in FINISHED_STATES and row["last_state"] not in FINISHED_STATES:
+            self._db.execute(
+                "UPDATE printers SET needs_attention=1, attention_reason=?, last_state=? WHERE id=?",
+                (FINISHED_REASON[state], state, printer_id),
+            )
+        else:
+            self._db.execute("UPDATE printers SET last_state=? WHERE id=?", (state, printer_id))
 
     async def run(self, printer_id: str, fn: Callable[[MoonrakerClient], Awaitable[T]]) -> T:
         """Calls fn with a client; if a trusted cached address fails, re-resolves and retries once."""
@@ -140,6 +183,8 @@ class Printers:
                 return c, await c.telemetry()
 
             client, t = await self.run(printer["id"], fetch)
+            self.observe_state(printer["id"], t["state"])
+            attention = self.needs_attention(printer["id"])
             remaining = None
             if t["state"] in ACTIVE_STATES and t["filename"]:
                 key = (printer["id"], t["filename"])
@@ -155,13 +200,24 @@ class Printers:
                 **t,
                 "connected": True,
                 "error": None,
+                "needs_attention": attention is not None,
+                "attention_reason": attention,
                 "remaining": remaining,
                 "address": urlsplit(client.base_url).hostname,
                 "webcams": [c["name"] for c in await self._webcam_list(printer["id"], client)],
             }
         except PrinterError as e:
             self._verified.pop(printer["id"], None)
-            return {**base, "connected": False, "error": str(e), "state": "offline", "webcams": []}
+            attention = self.needs_attention(printer["id"])
+            return {
+                **base,
+                "connected": False,
+                "error": str(e),
+                "state": "offline",
+                "webcams": [],
+                "needs_attention": attention is not None,
+                "attention_reason": attention,
+            }
 
     @staticmethod
     async def connected_client(client: MoonrakerClient) -> MoonrakerClient:

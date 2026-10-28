@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api, OrcaStatus, Printer, PrinterStatus } from "../api";
+import { ActivityItem, api, OrcaStatus, Printer, PrinterStatus } from "../api";
 import { useToast } from "../toast";
 import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
 
@@ -10,6 +10,7 @@ export default function SettingsPage({ username, onLogout }: { username: string;
       <Printers />
       <OrcaVersions />
       <JobCleanup />
+      <ActivityLog />
       <PasswordForm />
       <div className="card row between">
         <span>
@@ -301,6 +302,84 @@ function OrcaVersions() {
           </ul>
         </details>
       )}
+    </div>
+  );
+}
+
+const ACTIONS: Record<string, string> = {
+  login: "Signed in",
+  login_failed: "Failed sign-in",
+  login_locked: "Sign-in locked after failures",
+  setup_complete: "Created the admin account",
+  setup_failed: "Setup attempt failed",
+  password_changed: "Changed password",
+  model_upload: "Uploaded a model",
+  model_delete: "Deleted a model",
+  model_import: "Imported a model from a link",
+  slice_submit: "Started a slice",
+  slice_retry: "Retried a slice",
+  jobs_cleanup: "Cleared old jobs",
+  job_send: "Sent a print to a printer",
+  printer_add: "Added a printer",
+  printer_delete: "Removed a printer",
+  printer_settings: "Changed printer search range",
+  bed_cleared: "Confirmed bed clear",
+  bed_flagged: "Flagged printer for attention",
+  queue_add: "Queued a print",
+  queue_cancel: "Removed a print from the queue",
+  queue_started: "Queue started a print",
+  queue_failed: "Queue couldn't start a print",
+  orca_settings: "Changed OrcaSlicer update settings",
+  orca_install: "Installed an OrcaSlicer update",
+  orca_activate: "Switched OrcaSlicer version",
+  orca_rollback: "Rolled back OrcaSlicer",
+};
+
+function ActivityLog() {
+  const [items, setItems] = useState<ActivityItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (offset: number) => {
+    try {
+      const page = await api<{ items: ActivityItem[]; total: number }>(`/api/activity?offset=${offset}&limit=30`);
+      setItems((cur) => (offset ? [...cur, ...page.items] : page.items));
+      setTotal(page.total);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) load(0);
+  }, [open, load]);
+
+  return (
+    <div className="card stack">
+      <h2>Activity</h2>
+      <details onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+        <summary>Show recent activity</summary>
+        {error && <p className="error">{error}</p>}
+        <ul className="list activity small">
+          {items.map((a) => (
+            <li key={a.id} className={a.action.includes("fail") || a.action.includes("locked") ? "warn-text" : undefined}>
+              <div>
+                <b>{a.actor ?? "HomeSlice"}</b> {(ACTIONS[a.action] ?? a.action).toLowerCase()}
+              </div>
+              <div className="muted">
+                {new Date(a.at * 1000).toLocaleString()}
+                {a.detail && <span title={a.detail}> · {a.detail}</span>}
+              </div>
+            </li>
+          ))}
+        </ul>
+        {items.length < total && (
+          <button className="small secondary" onClick={() => load(items.length)}>
+            Load more
+          </button>
+        )}
+      </details>
     </div>
   );
 }

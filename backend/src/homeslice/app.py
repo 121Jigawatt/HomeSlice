@@ -21,6 +21,7 @@ from .orca.profiles import ProfileStore
 from .orca.updater import UpdateError, Updater
 from .orca.versions import VersionStore
 from .printers.service import Printers
+from .printers.queue import PrintQueue
 
 log = logging.getLogger("homeslice")
 
@@ -77,6 +78,7 @@ class Services:
     jobs: JobManager
     printers: Printers
     importer: Importer
+    queue: PrintQueue | None = None
     background_tasks: set[asyncio.Task] = field(default_factory=set)
 
 
@@ -87,7 +89,7 @@ def build_services(settings: Settings) -> Services:
     library = Library(db, settings)
     profiles = ProfileStore(settings.orca_datadir, versions.system_profile_dirs())
     secrets = SecretBox(settings.secret_key_file or settings.config_dir / "secret.key")
-    return Services(
+    services = Services(
         settings=settings,
         db=db,
         secrets=secrets,
@@ -100,6 +102,20 @@ def build_services(settings: Settings) -> Services:
         printers=Printers(db, secrets),
         importer=Importer(library, settings.tmp_dir, settings.max_upload_mb * 1024**2),
     )
+
+    def remote_name(job_id: str, file: str) -> str:
+        from .api.printer_routes import remote_name as name_for
+
+        return name_for(services, services.jobs.get(job_id) or {"id": job_id, "params": {}}, file)
+
+    services.queue = PrintQueue(
+        db,
+        services.printers,
+        lambda job_id, file: services.jobs.output_path(job_id, file) if file.endswith(".gcode") else None,
+        remote_name,
+        lambda actor, action, detail: services.auth.audit(actor, action, detail),
+    )
+    return services
 
 
 async def check_for_updates(services: Services) -> float:
@@ -160,6 +176,7 @@ def create_app(settings: Settings | None = None, *, start_background: bool = Tru
         if start_background:
             task = asyncio.create_task(update_checker(services))
             services.background_tasks.add(task)
+            services.background_tasks.add(asyncio.create_task(services.queue.run_forever()))
         try:
             yield
         finally:
