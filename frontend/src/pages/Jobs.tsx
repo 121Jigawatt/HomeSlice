@@ -4,7 +4,7 @@ import { api, Job, JobPage as JobPageData, Printer } from "../api";
 import { Icon, IconName } from "../icons";
 import { ModelThumb } from "../ModelThumb";
 import { displayName } from "../presetNames";
-import { BedFlag, formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinter, Webcam } from "../printers";
+import { BedFlag, formatDuration, IDLE_STATES, PrinterBadge, useLivePrinter, Webcam } from "../printers";
 import { PrintQueuePanel } from "../queue";
 import { useToast } from "../toast";
 import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
@@ -156,7 +156,6 @@ export function JobsPage({ compact = false }: { compact?: boolean }) {
   return (
     <section className="stack">
       {compact ? <h2>Jobs</h2> : <h1>Jobs</h1>}
-      {!compact && <PrinterStrip />}
       {!compact && <PrintQueuePanel />}
       <div className="card stack filters" role="search">
         <label>

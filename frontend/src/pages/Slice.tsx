@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, Job, Model, Preset, Printer as PrinterConfig } from "../api";
 import { ModelPicker } from "../ModelPicker";
 import { BED_TYPES, bedLabel, displayName } from "../presetNames";
-import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinters } from "../printers";
+import { formatDuration, IDLE_STATES, PrinterBadge, useLivePrinters } from "../printers";
 import { useToast } from "../toast";
 
 type Kind = "printer" | "process" | "filament";
@@ -324,9 +324,6 @@ export default function SlicePage() {
   return (
     <form className="stack slice-form" onSubmit={submit}>
       <h1 className="span-all">Slice</h1>
-      <div className="span-all">
-        <PrinterStrip />
-      </div>
       {prefillNote && <p className="muted small span-all">{prefillNote}</p>}
 
       <fieldset className="card stack slice-models">
