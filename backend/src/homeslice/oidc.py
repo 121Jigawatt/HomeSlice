@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 import jwt
@@ -67,6 +67,24 @@ def safe_next(path: str | None) -> str:
     return "/"
 
 
+def _token_error(label: str, r: httpx.Response) -> str:
+    """The provider's OAuth error in words people can act on."""
+    try:
+        body = r.json()
+    except ValueError:
+        body = {}
+    code = str(body.get("error", "")) if isinstance(body, dict) else ""
+    detail = str(body.get("error_description", "")).strip()[:200] if isinstance(body, dict) else ""
+    hints = {
+        "invalid_client": "it doesn't accept the client ID or secret. Copy the Client Secret from the authentik "
+        "provider again and save it under Settings → Single sign-on, and check the provider's Client type is Confidential.",
+        "invalid_grant": "the sign-in code was rejected. Check the redirect URI matches exactly, then try again.",
+        "unauthorized_client": "this client isn't allowed to use the authorization code flow.",
+    }
+    reason = hints.get(code, f"it answered {r.status_code}{f' ({code})' if code else ''}.")
+    return f"{label} refused the sign-in: {reason}" + (f" {label} says: {detail}" if detail else "")
+
+
 class Oidc:
     def __init__(self, db: Database, box: SecretBox, rbac: Rbac, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._db = db
@@ -92,7 +110,7 @@ class Oidc:
 
     def _secret(self) -> str:
         token = self._db.get_setting(SECRET_SETTING)
-        return self._box.decrypt(token) if token else ""
+        return self._box.decrypt(token).strip() if token else ""
 
     def save(self, cfg: OidcConfig, client_secret: str | None) -> None:
         cfg.issuer = cfg.issuer.strip()
@@ -111,6 +129,7 @@ class Oidc:
             {"group": str(m["group"]).strip()[:200], "role": m["role"]} for m in cfg.group_roles if str(m.get("group", "")).strip()
         ]
         if client_secret is not None:
+            client_secret = client_secret.strip()
             self._db.set_setting(SECRET_SETTING, self._box.encrypt(client_secret) if client_secret else "")
         if cfg.enabled and not (cfg.issuer and cfg.client_id and cfg.base_url and self._secret()):
             raise OidcError("Fill in the provider address, client ID, client secret and HomeSlice address first")
@@ -213,10 +232,11 @@ class Oidc:
         form = {"grant_type": "authorization_code", "code": code, "redirect_uri": cfg.redirect_uri, "code_verifier": row["verifier"]}
         methods = doc.get("token_endpoint_auth_methods_supported") or ["client_secret_basic"]
         auth = None
-        if "client_secret_basic" in methods:
-            auth = httpx.BasicAuth(cfg.client_id, secret)
-        else:
+        if "client_secret_post" in methods:
             form |= {"client_id": cfg.client_id, "client_secret": secret}
+        else:
+            # RFC 6749 2.3.1: both parts are form-encoded before Basic encoding.
+            auth = httpx.BasicAuth(quote(cfg.client_id, safe=""), quote(secret, safe=""))
         try:
             async with self._client(cfg) as client:
                 r = await client.post(doc["token_endpoint"], data=form, auth=auth)
@@ -224,8 +244,8 @@ class Oidc:
             log.warning("OIDC token request failed: %s", e)
             raise OidcError(f"Couldn't reach {cfg.label}") from None
         if r.status_code != 200:
-            log.warning("OIDC token endpoint returned %s: %s", r.status_code, r.text[:300])
-            raise OidcError(f"{cfg.label} refused the sign-in. Check the client ID, secret and redirect URI.")
+            log.warning("OIDC token endpoint returned %s: %s", r.status_code, r.text[:500])
+            raise OidcError(_token_error(cfg.label, r))
         tokens = r.json()
         claims = await self._verify_id_token(cfg, doc, str(tokens.get("id_token", "")), secret, row["nonce"])
         if doc.get("userinfo_endpoint") and tokens.get("access_token"):

@@ -20,6 +20,8 @@ class FakeIdp:
         self.alg = "RS256"
         self.nonce = ""
         self.token_requests: list[httpx.Request] = []
+        self.token_error: dict | None = None
+        self.auth_methods: list[str] | None = None
 
     def id_token(self) -> str:
         now = int(time.time())
@@ -33,18 +35,23 @@ class FakeIdp:
         path = request.url.path
         if path.endswith("/.well-known/openid-configuration"):
             base = "https://idp.test/application/o"
-            return httpx.Response(200, json={
+            doc = {
                 "issuer": ISSUER,
                 "authorization_endpoint": f"{base}/authorize/",
                 "token_endpoint": f"{base}/token/",
                 "jwks_uri": f"{base}/homeslice/jwks/",
                 "userinfo_endpoint": f"{base}/userinfo/",
-            })
+            }
+            if self.auth_methods:
+                doc["token_endpoint_auth_methods_supported"] = self.auth_methods
+            return httpx.Response(200, json=doc)
         if path.endswith("/jwks/"):
             jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(self.key.public_key()))
             return httpx.Response(200, json={"keys": [{**jwk, "kid": "k1", "use": "sig"}]})
         if path.endswith("/token/"):
             self.token_requests.append(request)
+            if self.token_error:
+                return httpx.Response(400, json=self.token_error)
             return httpx.Response(200, json={"access_token": "at", "token_type": "Bearer", "id_token": self.id_token()})
         if path.endswith("/userinfo/"):
             return httpx.Response(200, json={"sub": "abc123", "email": "alice@example.com"})
@@ -187,3 +194,25 @@ def test_provider_errors_and_settings_validation(authed, idp):
 def test_open_redirects_are_blocked(authed, idp):
     _, r = sign_in(authed, idp, next_path="//evil.test/x")
     assert r.headers["location"] == "/"
+
+
+def test_provider_token_errors_are_explained(authed, idp):
+    idp.token_error = {"error": "invalid_client", "error_description": "Client authentication failed"}
+    _, r = sign_in(authed, idp)
+    message = error_of(r)
+    assert "Client Secret" in message and "Client authentication failed" in message
+    idp.token_error = {"error": "invalid_grant"}
+    _, r = sign_in(authed, idp)
+    assert "redirect URI" in error_of(r)
+
+
+def test_client_secret_post_and_trimmed_secret(authed, idp):
+    idp.auth_methods = ["client_secret_post", "client_secret_basic"]
+    authed.app.state.services.oidc._discovery = None
+    cfg = authed.get("/api/sso").json()
+    authed.put("/api/sso", json={**cfg, "client_secret": f"  {SECRET}\n"})
+    _, r = sign_in(authed, idp)
+    assert r.headers["location"] == "/jobs", error_of(r)
+    sent = parse_qs(idp.token_requests[-1].content.decode())
+    assert sent["client_secret"] == [SECRET] and sent["client_id"] == ["homeslice"]
+    assert "authorization" not in idp.token_requests[-1].headers
