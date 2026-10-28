@@ -196,7 +196,7 @@ export function Webcam({ printerId, index, name }: { printerId: string; index: n
     return () => window.clearInterval(t);
   }, [live]);
 
-  // Dropping the src closes the MJPEG connection when the card closes or switches mode.
+  // Each mode gets its own <img>; clearing the old one's src closes its MJPEG connection without touching the new one.
   useEffect(() => {
     const img = imgRef.current;
     return () => {
@@ -208,7 +208,7 @@ export function Webcam({ printerId, index, name }: { printerId: string; index: n
   const src = live ? base : `${base}?snapshot=true&t=${tick}`;
   return (
     <figure className="webcam">
-      <img ref={imgRef} src={src} alt={`${name} webcam`} />
+      <img key={live ? "live" : "snapshot"} ref={imgRef} src={src} alt={`${name} webcam`} />
       <figcaption className="row between">
         <span>
           <Icon name="camera" size={14} /> {name}

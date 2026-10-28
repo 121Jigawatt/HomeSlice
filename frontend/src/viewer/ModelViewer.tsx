@@ -16,11 +16,16 @@ interface Bed {
 }
 
 async function loadModel(m: Model): Promise<THREE.Object3D> {
-  const res = await fetch(`/api/library/${m.id}/file`, { credentials: "same-origin" });
-  if (!res.ok) throw new Error(`Could not load ${m.filename}`);
+  // STEP is CAD, not a mesh: the server converts it to STL.
+  const isStep = m.ext === ".step" || m.ext === ".stp";
+  const res = await fetch(`/api/library/${m.id}/${isStep ? "mesh" : "file"}`, { credentials: "same-origin" });
+  if (!res.ok) {
+    const detail = await res.json().then((j) => j.detail as string).catch(() => "");
+    throw new Error(detail || `Could not load ${m.filename}`);
+  }
   const data = await res.arrayBuffer();
   const material = new THREE.MeshStandardMaterial({ color: ACCENT, roughness: 0.6, metalness: 0.05 });
-  if (m.ext === ".stl") {
+  if (m.ext === ".stl" || isStep) {
     const geo = new STLLoader().parse(data);
     geo.computeVertexNormals();
     return new THREE.Mesh(geo, material);
@@ -151,7 +156,12 @@ export default function ModelViewer({ models, printerPreset }: { models: Model[]
               : `Fits: ${size.x.toFixed(0)}\u00d7${size.y.toFixed(0)}\u00d7${size.z.toFixed(0)} mm on a ${bedSize.x.toFixed(0)}\u00d7${bedSize.y.toFixed(0)} mm bed.`
             : null,
         );
-        setStatus(failed ? `${failed} model(s) couldn't be previewed (too large or unsupported format).` : "");
+        const reason = results.find((r): r is PromiseRejectedResult => r.status === "rejected")?.reason as Error | undefined;
+        setStatus(
+          failed
+            ? `${failed} model(s) couldn't be previewed${reason?.message ? `: ${reason.message}` : " (too large or unsupported format)"}.`
+            : "",
+        );
         const view = box.clone().union(plateBox(bed.area, Math.min(bed.height, size.z || 60)));
         viewer.frame(objects.length ? box.clone().expandByScalar(Math.max(size.length() * 0.15, 5)) : view);
       });

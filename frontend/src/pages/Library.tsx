@@ -42,7 +42,7 @@ export default function LibraryPage() {
 
   // Thumbnails render in the background; refresh while recent previewable uploads still lack one.
   const pendingThumbs = (models ?? []).some(
-    (m) => !m.has_thumbnail && [".stl", ".3mf", ".obj"].includes(m.ext) && Date.now() / 1000 - m.created_at < 600,
+    (m) => !m.has_thumbnail && [".stl", ".3mf", ".obj", ".step", ".stp"].includes(m.ext) && Date.now() / 1000 - m.created_at < 600,
   );
   useEffect(() => {
     if (!pendingThumbs) return;

@@ -1,8 +1,11 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from ..auth import Session
 from ..library.service import TooLarge
+from ..library.step import StepError
 from ..library.validation import ValidationError
 from .deps import client_ip, require_session
 
@@ -46,6 +49,23 @@ def download_model(model_id: str, request: Request, _: Session = Depends(require
     if record is None or path is None or not path.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(path, filename=record["filename"], media_type="application/octet-stream")
+
+
+@router.get("/{model_id}/mesh")
+async def model_mesh(model_id: str, request: Request, _: Session = Depends(require_session)) -> FileResponse:
+    """The model as a mesh the browser can draw: STEP files are converted to STL (cached)."""
+    library = request.app.state.services.library
+    try:
+        if library.get(model_id) is None:
+            raise HTTPException(404, "Not found")
+        path = await asyncio.to_thread(library.mesh_path, model_id)
+    except ValidationError:
+        raise HTTPException(404, "Not found") from None
+    except StepError as e:
+        raise HTTPException(422, str(e)) from None
+    if path is None or not path.is_file():
+        raise HTTPException(404, "Not found")
+    return FileResponse(path, media_type="application/octet-stream")
 
 
 @router.get("/{model_id}/thumbnail")

@@ -172,11 +172,14 @@ def _limits(memory_bytes: int) -> Callable[[], None] | None:
 
 
 async def run_orca(args: list[str], cwd: Path, timeout_s: int, memory_mb: int) -> RunResult:
+    runtime = cwd / "xdg-runtime"
+    runtime.mkdir(mode=0o700, exist_ok=True)
     env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "HOME": str(cwd),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
+        "XDG_RUNTIME_DIR": str(runtime),
     }
     if sys.platform == "win32":
         env = {**os.environ, "HOME": str(cwd)}

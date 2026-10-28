@@ -7,13 +7,17 @@ import os
 import re
 import uuid
 import zipfile
-from pathlib import Path, PurePosixPath
+from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 from defusedxml import ElementTree
 from PIL import Image
 
 log = logging.getLogger(__name__)
+
+# STEP is rendered from its converted mesh.
+PREVIEWABLE_EXTS = (".stl", ".3mf", ".obj", ".step", ".stp")
 
 SIZE = 512
 SUPERSAMPLE = 2
@@ -340,14 +344,17 @@ class Thumbnails:
     def exists(self, model_id: str) -> bool:
         return self.path(model_id).is_file()
 
-    def schedule(self, model_id: str, source: Path, ext: str) -> None:
-        task = asyncio.create_task(self._make(model_id, source, ext))
+    def schedule(self, model_id: str, source: Path, ext: str, prepare: Callable[[], Path] | None = None) -> None:
+        """prepare, if given, runs first in a thread and returns an STL to render instead (e.g. a converted STEP)."""
+        task = asyncio.create_task(self._make(model_id, source, ext, prepare))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def _make(self, model_id: str, source: Path, ext: str) -> None:
+    async def _make(self, model_id: str, source: Path, ext: str, prepare: Callable[[], Path] | None) -> None:
         async with self._sem:
             try:
+                if prepare is not None:
+                    source, ext = await asyncio.to_thread(prepare), ".stl"
                 await asyncio.to_thread(generate, source, ext, self.path(model_id))
             except Exception as e:  # noqa: BLE001 - a bad model must never break uploads
                 log.info("No thumbnail for %s: %s", model_id, e)
@@ -360,4 +367,4 @@ class Thumbnails:
         self.path(model_id).unlink(missing_ok=True)
 
     def missing(self, models: list[dict]) -> list[dict]:
-        return [m for m in models if not self.exists(m["id"]) and PurePosixPath(m["ext"]).suffix in (".stl", ".3mf", ".obj")]
+        return [m for m in models if not self.exists(m["id"]) and m["ext"] in PREVIEWABLE_EXTS]

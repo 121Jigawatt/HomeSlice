@@ -13,6 +13,7 @@ dependencies = [
     "pillow>=10.4",
     "numpy>=1.26",
     "defusedxml>=0.7",
+    "cascadio>=0.1.1",
 ]
 
 [project.optional-dependencies]

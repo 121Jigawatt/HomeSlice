@@ -14,8 +14,10 @@ from typing import Any
 from ..config import Settings
 from ..db import Database
 from ..library.service import Library
+from ..library.step import StepError
 from .cli import BED_TEMP_KEYS, SliceArgsError, SliceSpec, build_args, run_orca, validate_overrides
 from .errors import explain, signed_code
+from .gcode_thumbs import embed as embed_thumbnails
 from .profiles import ProfileError, ProfileStore
 from .versions import VersionStore
 
@@ -353,9 +355,9 @@ class JobManager:
                 for i, name in enumerate(req.filaments)
             ]
             size_for_filaments(process, filaments)
-            inputs = [
-                self._library.path_for(mid) for mid, n in zip(req.model_ids, req.counts()) for _ in range(n)
-            ]
+            # STEP models are sliced from their converted mesh (Orca's CLI only reads STL/OBJ/AMF/3MF).
+            meshes = {mid: await asyncio.to_thread(self._library.mesh_path, mid) for mid in dict.fromkeys(req.model_ids)}
+            inputs = [meshes[mid] for mid, n in zip(req.model_ids, req.counts()) for _ in range(n)]
             if any(p is None for p in inputs):
                 raise SliceArgsError("A selected model no longer exists")
             spec = SliceSpec(
@@ -369,7 +371,7 @@ class JobManager:
                 plate=req.plate,
             )
             args = build_args(binary, spec, outdir.resolve(), datadir.resolve(), (jdir / "orca.log").resolve())
-        except (ProfileError, SliceArgsError, OSError, ValueError) as e:
+        except (ProfileError, SliceArgsError, StepError, OSError, ValueError) as e:
             self._finish(job_id, "failed", str(e), error_kind="setup")
             return
 
@@ -399,6 +401,11 @@ class JobManager:
                 error_kind="orca",
             )
         else:
+            for gcode in gcodes:
+                try:
+                    await asyncio.to_thread(embed_thumbnails, gcode, outdir / "result.gcode.3mf", printer)
+                except Exception as e:  # noqa: BLE001 - a missing preview must not fail a good slice
+                    log.info("No G-code thumbnail for %s: %s", job_id, e)
             self._finish(job_id, "done", None, parse_gcode_stats(gcodes[0]))
 
     def log_tail(self, job_id: str) -> str:
