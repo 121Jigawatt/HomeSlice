@@ -20,7 +20,7 @@ from ..db import Database
 from ..library import threemf
 from ..library.service import Library
 from ..library.step import StepError
-from ..library.thumbnails import ThumbnailError
+from ..library.thumbnails import ThumbnailError, footprint_mm2
 from .cli import BED_TEMP_KEYS, SliceArgsError, SliceSpec, build_args, run_orca, validate_overrides
 from .errors import explain, signed_code
 from .gcode_thumbs import embed as embed_thumbnails
@@ -87,22 +87,6 @@ def bed_area(printer_json: Path) -> float:
     area = sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]))
     return abs(area) / 2 or 256.0 * 256.0
 
-
-def footprint_mm2(mesh: Path) -> float:
-    """XY bounding-box area of a mesh as stored (arrange may rotate it, so this is an estimate)."""
-    from ..library.thumbnails import load_obj, load_stl
-
-    tris = load_stl(mesh) if mesh.suffix.lower() == ".stl" else load_obj(mesh)
-    lo, hi = np.full(2, np.inf), np.full(2, -np.inf)
-    for start in range(0, len(tris), 500_000):
-        pts = np.asarray(tris[start : start + 500_000, :, :2], dtype=np.float64).reshape(-1, 2)
-        pts = pts[np.isfinite(pts).all(axis=1)]
-        if len(pts):
-            lo, hi = np.minimum(lo, pts.min(axis=0)), np.maximum(hi, pts.max(axis=0))
-    if not np.isfinite(lo).all():
-        return 0.0
-    w, h = hi - lo
-    return float(w * h)
 
 
 _DURATION = re.compile(r"(\d+(?:\.\d+)?)\s*([dhms])")

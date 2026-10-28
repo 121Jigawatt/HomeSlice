@@ -308,6 +308,21 @@ def render(tris: np.ndarray) -> Image.Image:
     return Image.fromarray(pixels, "RGBA").resize((SIZE, SIZE), Image.LANCZOS)
 
 
+def footprint_mm2(mesh: Path) -> float:
+    """XY bounding-box area of a mesh as stored (arrange may rotate it, so this is an estimate)."""
+    tris = load_stl(mesh) if mesh.suffix.lower() == ".stl" else load_obj(mesh)
+    lo, hi = np.full(2, np.inf), np.full(2, -np.inf)
+    for start in range(0, len(tris), 500_000):
+        pts = np.asarray(tris[start : start + 500_000, :, :2], dtype=np.float64).reshape(-1, 2)
+        pts = pts[np.isfinite(pts).all(axis=1)]
+        if len(pts):
+            lo, hi = np.minimum(lo, pts.min(axis=0)), np.maximum(hi, pts.max(axis=0))
+    if not np.isfinite(lo).all():
+        return 0.0
+    w, h = hi - lo
+    return float(w * h)
+
+
 def generate(source: Path, ext: str, dest: Path) -> bool:
     """Writes dest atomically. Returns False for formats that can't be previewed (e.g. STEP)."""
     if source.stat().st_size > MAX_SOURCE_BYTES:

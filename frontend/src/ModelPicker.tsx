@@ -74,35 +74,44 @@ export function ModelPicker({
       {chosen.length > 0 ? (
         <ul className="list picked-models">
           {chosen.map((m) => (
-            <li key={m.id} className="row picked-model">
+            <li key={m.id} className="picked-model">
               <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={40} />
-              <div className="grow stack picked-info">
-                <span className="title">{m.filename}</span>
-                {m.plates && m.plates.length > 1 && (
-                  <label className="plate-select">
-                    <span className="sr-only">Plate of {m.filename}</span>
-                    <select value={plates[m.id] ?? m.plates[0].index} onChange={(e) => onPlate(m.id, Number(e.target.value))}>
-                      {m.plates.map((p) => (
-                        <option key={p.index} value={p.index}>
-                          Plate {p.index}
-                          {p.name ? `: ${p.name}` : ""} ({p.objects} object{p.objects === 1 ? "" : "s"})
-                        </option>
-                      ))}
-                      <option value={0}>All plates, arranged together</option>
-                      <option value={-1}>Every plate, each on its own bed</option>
-                    </select>
-                  </label>
-                )}
-              </div>
-              <Quantity name={m.filename} value={copies[m.id] ?? 1} onChange={(n) => onCopies(m.id, n)} />
+              <span className="title picked-name" title={m.filename}>
+                {m.filename}
+              </span>
               <button
                 type="button"
-                className="icon-button secondary"
+                className="icon-button secondary picked-remove"
                 onClick={() => onToggle(m.id)}
                 aria-label={`Remove ${m.filename}`}
               >
                 <Icon name="close" size={16} />
               </button>
+              <div className="picked-controls">
+                {m.plates && m.plates.length > 1 && (
+                  <label className="plate-select">
+                    <span className="small muted">Plates</span>
+                    <select value={plates[m.id] ?? m.plates[0].index} onChange={(e) => onPlate(m.id, Number(e.target.value))}>
+                      <optgroup label="One saved plate">
+                        {m.plates.map((p) => (
+                          <option key={p.index} value={p.index}>
+                            Plate {p.index}
+                            {p.name ? `: ${p.name}` : ""} ({p.objects} object{p.objects === 1 ? "" : "s"})
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label={`All ${m.plates.length} plates`}>
+                        <option value={-1}>Each plate on its own bed ({m.plates.length} beds)</option>
+                        <option value={0}>All objects arranged onto shared beds</option>
+                      </optgroup>
+                    </select>
+                  </label>
+                )}
+                <div className="copies">
+                  <span className="small muted">Copies</span>
+                  <Quantity name={m.filename} value={copies[m.id] ?? 1} onChange={(n) => onCopies(m.id, n)} />
+                </div>
+              </div>
             </li>
           ))}
         </ul>

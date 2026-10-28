@@ -12,7 +12,7 @@ from ..db import Database
 from . import threemf
 from .step import STEP_EXTS
 from .step import convert as step_convert
-from .thumbnails import Thumbnails
+from .thumbnails import Thumbnails, footprint_mm2
 from .validation import ValidationError, normalize_ext, safe_display_name, validate_file
 
 
@@ -36,6 +36,7 @@ class Library:
         self._convert_locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._plates: dict[str, list[dict]] = {}
+        self._parts: dict[str, list[dict]] = {}
 
     def path_for(self, model_id: str) -> Path | None:
         row = self._db.one("SELECT id, ext FROM models WHERE id=?", (parse_model_id(model_id),))
@@ -134,22 +135,45 @@ class Library:
             self._plates[mid] = [{"index": p["index"], "name": p["name"], "objects": len(p["object_ids"])} for p in found]
         return self._plates[mid]
 
-    def preview_mesh(self, model_id: str, plate: int = 0) -> Path | None:
-        """An STL of the model for the browser; 3MF projects are flattened (optionally one plate). Blocking."""
+    def preview_mesh(self, model_id: str, plate: int = 0, item: int = 0) -> Path | None:
+        """An STL of the model for the browser: a 3MF's single object (item) or flattened plate. Blocking."""
         path = self.path_for(model_id)
         if path is None or path.suffix != ".3mf":
             return self.mesh_path(model_id)
         mid = parse_model_id(model_id)
-        dest = self._settings.library_dir / f"{mid}.plate{plate}.stl"
+        dest = self._settings.library_dir / (f"{mid}.item{item}.stl" if item else f"{mid}.plate{plate}.stl")
         with self._convert_lock(mid):
             if not dest.is_file():
                 tmp = dest.with_name(f"{dest.stem}.{uuid.uuid4().hex}.tmp")
                 try:
-                    threemf.write_combined(path, tmp, plate)
+                    if item:
+                        threemf.write_item(path, item, tmp)
+                    else:
+                        threemf.write_combined(path, tmp, plate)
                     os.replace(tmp, dest)
                 finally:
                     tmp.unlink(missing_ok=True)
         return dest
+
+    def parts(self, model_id: str) -> list[dict]:
+        """Printable objects with their footprint (mm²), for planning beds: a 3MF lists each build item
+        with its saved plate; other files are a single part. Blocking; cached."""
+        mid = parse_model_id(model_id)
+        if mid in self._parts:
+            return self._parts[mid]
+        path = self.path_for(mid)
+        if path is None:
+            return []
+        if path.suffix == ".3mf":
+            found = [
+                {**o, "footprint": footprint_mm2(self.preview_mesh(mid, item=o["item"]))}
+                for o in threemf.objects(path)
+            ]
+        else:
+            mesh = self.mesh_path(mid)
+            found = [{"item": 0, "plate": 0, "footprint": footprint_mm2(mesh) if mesh else 0.0}]
+        self._parts[mid] = found
+        return found
 
     def list(self) -> list[dict]:
         return [self._public(r) for r in self._db.all("SELECT * FROM models ORDER BY created_at DESC")]
@@ -174,6 +198,9 @@ class Library:
         self._converted(mid).unlink(missing_ok=True)
         for cached in self._settings.library_dir.glob(f"{mid}.plate*.stl"):
             cached.unlink(missing_ok=True)
+        for cached in self._settings.library_dir.glob(f"{mid}.item*.stl"):
+            cached.unlink(missing_ok=True)
         self._plates.pop(mid, None)
+        self._parts.pop(mid, None)
         self.thumbnails.delete(mid)
         return True

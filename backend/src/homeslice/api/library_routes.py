@@ -54,14 +54,18 @@ def download_model(model_id: str, request: Request, _: Session = Depends(require
 
 @router.get("/{model_id}/mesh")
 async def model_mesh(
-    model_id: str, request: Request, plate: int = Query(0, ge=0, le=999), _: Session = Depends(require_session)
+    model_id: str,
+    request: Request,
+    plate: int = Query(0, ge=0, le=999),
+    item: int = Query(0, ge=0, le=500),
+    _: Session = Depends(require_session),
 ) -> FileResponse:
-    """The model as an STL the browser can draw: STEP converted, 3MF projects flattened (optionally one plate)."""
+    """The model as an STL the browser can draw: STEP converted, 3MF flattened per plate or one object (item)."""
     library = request.app.state.services.library
     try:
         if library.get(model_id) is None:
             raise HTTPException(404, "Not found")
-        path = await asyncio.to_thread(library.preview_mesh, model_id, plate)
+        path = await asyncio.to_thread(library.preview_mesh, model_id, plate, item)
     except ValidationError:
         raise HTTPException(404, "Not found") from None
     except (StepError, ThumbnailError) as e:
@@ -69,6 +73,20 @@ async def model_mesh(
     if path is None or not path.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(path, media_type="application/octet-stream")
+
+
+@router.get("/{model_id}/parts")
+async def model_parts(model_id: str, request: Request, _: Session = Depends(require_session)) -> list[dict]:
+    """Objects and footprints used to plan beds on the Slice page (3MF: one entry per object, with its plate)."""
+    library = request.app.state.services.library
+    try:
+        if library.get(model_id) is None:
+            raise HTTPException(404, "Not found")
+        return await asyncio.to_thread(library.parts, model_id)
+    except ValidationError:
+        raise HTTPException(404, "Not found") from None
+    except (StepError, ThumbnailError) as e:
+        raise HTTPException(422, str(e)) from None
 
 
 @router.get("/{model_id}/thumbnail")

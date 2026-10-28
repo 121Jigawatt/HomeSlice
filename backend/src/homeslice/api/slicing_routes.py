@@ -28,6 +28,8 @@ class JobBody(BaseModel):
     model_plates: list[int] = Field(default_factory=list, max_length=50)
     # Physical printer the result is meant for; its printer profile must match `printer`.
     target_printer_id: str | None = Field(default=None, max_length=64)
+    # Overrides the target printer's bed coverage for this slice.
+    bed_coverage: int | None = Field(default=None, ge=10, le=100)
 
 
 def _job_id(job_id: str) -> str:
@@ -130,9 +132,12 @@ def create_job(body: JobBody, request: Request, session: Session = Depends(requi
         except PrinterError as e:
             raise HTTPException(400, str(e)) from None
         coverage = target["bed_coverage"]
+    if body.bed_coverage is not None:
+        coverage = body.bed_coverage
     try:
         job_id = services.jobs.submit(
-            JobRequest(**body.model_dump(exclude={"target_printer_id"}), bed_coverage=coverage), owner=session.username
+            JobRequest(**body.model_dump(exclude={"target_printer_id", "bed_coverage"}), bed_coverage=coverage),
+            owner=session.username,
         )
     except (SliceArgsError, ValueError) as e:
         raise HTTPException(400, str(e)) from None

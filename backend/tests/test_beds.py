@@ -12,7 +12,8 @@ from test_threemf import bambu_project
 from homeslice.app import build_services
 from homeslice.library.step import write_binary_stl
 from homeslice.orca.cli import RunResult
-from homeslice.orca.jobs import JobRequest, bed_area, combine_stats, footprint_mm2
+from homeslice.library.thumbnails import footprint_mm2
+from homeslice.orca.jobs import JobRequest, bed_area, combine_stats
 
 SQUARE_100 = [  # 100 x 100 mm footprint, two triangles
     [[0, 0, 0], [100, 0, 0], [100, 100, 0]],

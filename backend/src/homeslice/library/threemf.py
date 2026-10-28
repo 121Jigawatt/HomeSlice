@@ -86,3 +86,27 @@ def write_items(source: Path, dest_dir: Path, plate: int = 0) -> list[Path]:
 def write_combined(source: Path, dest: Path, plate: int = 0) -> None:
     """All objects in one STL at their saved positions (for the browser preview)."""
     write_binary_stl(dest, np.concatenate(item_meshes(source, plate)))
+
+
+def objects(source: Path) -> list[dict]:
+    """Build items in file order: [{item (1-based), plate (0 if on no saved plate)}]."""
+    on_plate = {oid: p["index"] for p in plates(source) for oid in p["object_ids"]}
+    with zipfile.ZipFile(source) as zf:
+        _, items = _ThreeMF(zf)._read(_root_model(zf))
+    if len(items) > MAX_ITEMS:
+        raise ThumbnailError(f"3MF has more than {MAX_ITEMS} objects")
+    return [{"item": n, "plate": on_plate.get(oid or "", 0)} for n, (_, oid, _) in enumerate(items, start=1)]
+
+
+def write_item(source: Path, item: int, dest: Path) -> None:
+    """One build item (1-based) as a world-space STL."""
+    with zipfile.ZipFile(source) as zf:
+        model = _ThreeMF(zf)
+        _, items = model._read(_root_model(zf))
+        if not 1 <= item <= len(items):
+            raise ThumbnailError(f"This 3MF has no object {item}")
+        path, oid, matrix = items[item - 1]
+        parts = [_apply(p, matrix) for p in model._object(path, oid, 0)]
+    if not parts:
+        raise ThumbnailError(f"Object {item} has no geometry")
+    write_binary_stl(dest, np.concatenate(parts))

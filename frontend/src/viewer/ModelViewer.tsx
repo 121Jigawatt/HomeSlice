@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
-import { ThreeMFLoader } from "three/addons/loaders/3MFLoader.js";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { api, Model } from "../api";
 import { ACCENT, buildPlate, createViewer, plateBox, Viewer } from "./scene";
@@ -15,14 +14,15 @@ interface Bed {
   height: number;
 }
 
-type PreviewModel = Model & { plate?: number };
+/** A model to draw; for a 3MF, `item` is one of its objects (each is laid out separately, as the slicer arranges). */
+export type PreviewModel = Model & { item?: number };
 
 async function loadModel(m: PreviewModel): Promise<THREE.Object3D> {
-  // STEP (CAD) and 3MF projects come from the server as STL: STEP converted, 3MF flattened per plate. three.js'
-  // 3MF loader can't follow Bambu Studio's multi-file objects.
+  // STEP (CAD) and 3MF objects come from the server as STL; three.js' 3MF loader can't follow Bambu Studio's
+  // multi-file objects.
   const isStep = m.ext === ".step" || m.ext === ".stp";
   const viaServer = isStep || m.ext === ".3mf";
-  const url = viaServer ? `/api/library/${m.id}/mesh?plate=${Math.max(0, m.plate ?? 0)}` : `/api/library/${m.id}/file`;
+  const url = viaServer ? `/api/library/${m.id}/mesh?item=${m.item ?? 0}` : `/api/library/${m.id}/file`;
   const res = await fetch(url, { credentials: "same-origin" });
   if (!res.ok) {
     const detail = await res.json().then((j) => j.detail as string).catch(() => "");
@@ -34,13 +34,6 @@ async function loadModel(m: PreviewModel): Promise<THREE.Object3D> {
     const geo = new STLLoader().parse(data);
     geo.computeVertexNormals();
     return new THREE.Mesh(geo, material);
-  }
-  if (m.ext === ".3mf") {
-    const group = new ThreeMFLoader().parse(data);
-    group.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = material;
-    });
-    return group;
   }
   if (m.ext === ".obj") {
     const group = new OBJLoader().parse(new TextDecoder().decode(data));
@@ -138,7 +131,7 @@ export default function ModelViewer({ models, printerPreset }: { models: Preview
       // Copies share one download and geometry.
       const loads = new Map<string, Promise<THREE.Object3D>>();
       const load = (m: PreviewModel) => {
-        const key = `${m.id}:${m.plate ?? 0}`;
+        const key = `${m.id}:${m.item ?? 0}`;
         if (!loads.has(key)) loads.set(key, loadModel(m));
         return loads.get(key)!.then((o) => o.clone());
       };

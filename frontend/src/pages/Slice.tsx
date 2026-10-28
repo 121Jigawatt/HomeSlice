@@ -2,6 +2,7 @@ import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, Job, Model, Preset, Printer as PrinterConfig } from "../api";
 import { ModelPicker } from "../ModelPicker";
+import { ModelPart, planBeds, polygonArea } from "../bedPlan";
 import { BED_TYPES, bedLabel, displayName } from "../presetNames";
 import { formatDuration, IDLE_STATES, PrinterBadge, useLivePrinters } from "../printers";
 import { useToast } from "../toast";
@@ -233,17 +234,45 @@ export default function SlicePage() {
     [presetsLoaded, includeSystem, presets.printer.length],
   );
   const selectedModels = useMemo(() => models.filter((m) => selected.has(m.id)), [models, selected]);
-  const previewModels = useMemo(
-    () =>
-      selectedModels.flatMap((m) => Array.from({ length: copies[m.id] ?? 1 }, () => ({ ...m, plate: plateOf(m) }))),
+
+  // Bed plan: each model's printable objects (with footprints) and the bed outline, grouped like the server will.
+  const [partsByModel, setPartsByModel] = useState<Record<string, ModelPart[]>>({});
+  const [bedArea, setBedArea] = useState<number | null>(null);
+  const [coverage, setCoverage] = useState(50);
+  const [bedIndex, setBedIndex] = useState(0);
+  useEffect(() => {
+    for (const id of selected) {
+      if (partsByModel[id]) continue;
+      api<ModelPart[]>(`/api/library/${id}/parts`)
+        .then((parts) => setPartsByModel((c) => ({ ...c, [id]: parts })))
+        .catch(() => setPartsByModel((c) => ({ ...c, [id]: [{ item: 0, plate: 0, footprint: 0 }] })));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedModels, copies, plates],
+  }, [selected]);
+  useEffect(() => {
+    if (!printer) return setBedArea(null);
+    api<{ area: [number, number][] }>(`/api/printer-bed?name=${encodeURIComponent(printer)}`)
+      .then((b) => setBedArea(polygonArea(b.area) || 256 * 256))
+      .catch(() => setBedArea(256 * 256));
+  }, [printer]);
+  useEffect(() => setCoverage(target?.bed_coverage ?? 50), [target?.id, target?.bed_coverage]);
+  const beds = useMemo(() => {
+    if (!bedArea || selectedModels.some((m) => !partsByModel[m.id])) return null;
+    const order = [...selected].map((id) => selectedModels.find((m) => m.id === id)).filter((m): m is Model => !!m);
+    return planBeds(
+      order.map((m) => ({ model: m, copies: countOf(m.id), plate: plateOf(m), parts: partsByModel[m.id] })),
+      coverage,
+      bedArea,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedModels, selected, partsByModel, bedArea, coverage, copies, plates]);
+  const bed = beds?.[Math.min(bedIndex, beds.length - 1)];
+  const previewModels = useMemo(
+    () => (bed ? bed.parts.map((p) => ({ ...p.model, item: p.item })) : []),
+    [bed],
   );
-  const objectsIn = (m: Model) => {
-    const p = plateOf(m);
-    return p > 0 ? (m.plates?.find((x) => x.index === p)?.objects ?? 1) : (m.plates?.reduce((n, x) => n + x.objects, 0) || 1);
-  };
-  const totalObjects = selectedModels.reduce((n, m) => n + countOf(m.id) * objectsIn(m), 0);
+  const sharedBeds = beds?.some((b) => b.projectPlate === undefined && b.parts.length > 0) ?? false;
+  const totalObjects = beds ? beds.reduce((n, b) => n + b.parts.length, 0) : selectedModels.length;
   const chosenFilaments = filaments.filter(Boolean);
 
   const blockers: string[] = [];
@@ -305,6 +334,7 @@ export default function SlicePage() {
           arrange,
           orient,
           target_printer_id: target?.id ?? null,
+          bed_coverage: coverage,
         },
       });
       notify("Slice started.", { action: { label: "View", to: `/jobs/${job.id}` } });
@@ -353,9 +383,60 @@ export default function SlicePage() {
           onPlate={(id, p) => setPlates((c) => ({ ...c, [id]: p }))}
         />
         {selected.size > 0 && (
-          <Suspense fallback={<div className="viewer placeholder muted small">Loading 3D preview…</div>}>
-            <ModelViewer models={previewModels} printerPreset={printer} />
-          </Suspense>
+          <section className="stack beds" aria-labelledby="beds-title">
+            <div className="row between">
+              <strong id="beds-title">
+                {beds ? `${beds.length} bed${beds.length === 1 ? "" : "s"}` : "Planning beds…"}
+              </strong>
+              {beds && beds.length > 1 && (
+                <span className="muted small">Each bed is its own G-code file; bed 1 prints first.</span>
+              )}
+            </div>
+            {sharedBeds && totalObjects > 1 && (
+              <label className="coverage small">
+                Fill each bed up to
+                <input
+                  type="range"
+                  min={10}
+                  max={100}
+                  step={5}
+                  value={coverage}
+                  onChange={(e) => setCoverage(Number(e.target.value))}
+                  aria-valuetext={`${coverage}% of the bed`}
+                />
+                <b>{coverage}%</b>
+                <span className="muted">
+                  {target ? `(${target.name} default ${target.bed_coverage}%)` : "(default 50%)"}
+                </span>
+              </label>
+            )}
+            {beds && beds.length > 1 && (
+              <div className="bed-tabs" role="tablist" aria-label="Beds">
+                {beds.map((b, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    role="tab"
+                    className="bed-tab"
+                    aria-selected={bed === b}
+                    onClick={() => setBedIndex(i)}
+                  >
+                    Bed {i + 1}
+                    <small>
+                      {b.parts.length} part{b.parts.length === 1 ? "" : "s"}
+                      {b.projectPlate ? ` \u00b7 plate ${b.projectPlate}` : ""}
+                    </small>
+                    <span className="meter" aria-hidden="true">
+                      <span style={{ width: `${Math.min(100, b.coverage)}%` }} />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <Suspense fallback={<div className="viewer placeholder muted small">Loading 3D preview…</div>}>
+              <ModelViewer models={previewModels} printerPreset={printer} />
+            </Suspense>
+          </section>
         )}
       </fieldset>
 
@@ -429,12 +510,11 @@ export default function SlicePage() {
           <dd>{infill ? `${infill}%` : "Process default"}</dd>
           <dt>Supports</dt>
           <dd>{SUPPORT_LABELS[supports]}</dd>
-          {totalObjects > 1 && (
+          {beds && (totalObjects > 1 || beds.length > 1) && (
             <>
               <dt>Beds</dt>
               <dd>
-                New bed after {target?.bed_coverage ?? 50}% coverage
-                {target ? "" : " (default)"}; each bed is its own file
+                {beds.length} ({totalObjects} parts{sharedBeds ? `, filled up to ${coverage}%` : ""})
               </dd>
             </>
           )}
