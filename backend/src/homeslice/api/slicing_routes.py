@@ -9,6 +9,7 @@ from ..orca.cli import SliceArgsError
 from ..orca.jobs import JobRequest
 from ..orca.profiles import KIND_DIRS, ProfileError
 from ..printers.moonraker import PrinterError
+from ..printers.service import DEFAULT_BED_COVERAGE
 from .deps import client_ip, require_session
 
 router = APIRouter(prefix="/api", tags=["slicing"])
@@ -119,6 +120,7 @@ def layer_heights(
 @router.post("/jobs", status_code=202)
 def create_job(body: JobBody, request: Request, session: Session = Depends(require_session)) -> dict:
     services = request.app.state.services
+    coverage = DEFAULT_BED_COVERAGE
     if body.target_printer_id:
         try:
             target = services.printers.get(body.target_printer_id)
@@ -127,14 +129,62 @@ def create_job(body: JobBody, request: Request, session: Session = Depends(requi
             services.printers.check_gcode_fits(target, body.printer)
         except PrinterError as e:
             raise HTTPException(400, str(e)) from None
+        coverage = target["bed_coverage"]
     try:
         job_id = services.jobs.submit(
-            JobRequest(**body.model_dump(exclude={"target_printer_id"})), owner=session.username
+            JobRequest(**body.model_dump(exclude={"target_printer_id"}), bed_coverage=coverage), owner=session.username
         )
     except (SliceArgsError, ValueError) as e:
         raise HTTPException(400, str(e)) from None
     services.auth.audit(session.username, "slice_submit", job_id, client_ip(request))
     return {"id": job_id}
+
+
+class ResliceBody(BaseModel):
+    printer_id: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/jobs/{job_id}/reslice", status_code=202)
+def reslice_for_printer(
+    job_id: str, body: ResliceBody, request: Request, session: Session = Depends(require_session)
+) -> dict:
+    """Re-slices a job for another physical printer: its profile and defaults, the job's models and overrides."""
+    services = request.app.state.services
+    job = services.jobs.get(_job_id(job_id))
+    if job is None:
+        raise HTTPException(404, "Not found")
+    try:
+        printer = services.printers.get(body.printer_id)
+    except PrinterError:
+        printer = None
+    if printer is None:
+        raise HTTPException(404, "Unknown printer")
+    if not printer["printer_preset"]:
+        raise HTTPException(400, f"Set {printer['name']}'s OrcaSlicer printer profile under Settings \u2192 Printers first.")
+    if not printer["default_process"] or not printer["default_filaments"]:
+        raise HTTPException(
+            400,
+            f"Set a default process and filament for {printer['name']} under Settings \u2192 Printers, "
+            "or re-slice from the Slice page to pick them.",
+        )
+    params = dict(job["params"])
+    overrides = dict(params.get("overrides") or {})
+    if printer["default_bed_type"]:
+        overrides["curr_bed_type"] = printer["default_bed_type"]
+    params.update(
+        printer=printer["printer_preset"],
+        process=printer["default_process"],
+        filaments=printer["default_filaments"],
+        overrides=overrides,
+        bed_coverage=printer["bed_coverage"],
+    )
+    known = set(JobRequest.__dataclass_fields__)
+    try:
+        new_id = services.jobs.submit(JobRequest(**{k: v for k, v in params.items() if k in known}), owner=session.username)
+    except (SliceArgsError, ValueError) as e:
+        raise HTTPException(400, str(e)) from None
+    services.auth.audit(session.username, "slice_reslice", f"{job['title'] or job_id} -> {printer['name']}", client_ip(request))
+    return {"id": new_id}
 
 
 JOB_STATUSES = {"queued", "running", "done", "failed", "cancelled"}

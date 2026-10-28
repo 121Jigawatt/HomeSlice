@@ -241,7 +241,7 @@ export default function SlicePage() {
   );
   const objectsIn = (m: Model) => {
     const p = plateOf(m);
-    return p ? (m.plates?.find((x) => x.index === p)?.objects ?? 1) : (m.plates?.reduce((n, x) => n + x.objects, 0) || 1);
+    return p > 0 ? (m.plates?.find((x) => x.index === p)?.objects ?? 1) : (m.plates?.reduce((n, x) => n + x.objects, 0) || 1);
   };
   const totalObjects = selectedModels.reduce((n, m) => n + countOf(m.id) * objectsIn(m), 0);
   const chosenFilaments = filaments.filter(Boolean);
@@ -404,6 +404,60 @@ export default function SlicePage() {
         </fieldset>
       )}
 
+      {error && <p className="error">{error}</p>}
+
+      <section className="card stack" aria-labelledby="recap-title">
+        <strong id="recap-title">Summary</strong>
+        <dl className="recap small">
+          <dt>Models</dt>
+          <dd>
+            {selectedModels.map((m) => (countOf(m.id) > 1 ? `${m.filename} \u00d7${countOf(m.id)}` : m.filename)).join(", ") ||
+              "\u2014"}
+            {totalObjects > 1 && <span className="muted"> ({totalObjects} objects)</span>}
+          </dd>
+          <dt>Printer</dt>
+          <dd title={printer}>{printer ? displayName(printer) : "—"}</dd>
+          <dt>Process</dt>
+          <dd title={process}>{process ? displayName(process) : "—"}</dd>
+          <dt>Filament</dt>
+          <dd>{chosenFilaments.map(displayName).join(", ") || "—"}</dd>
+          <dt>Plate</dt>
+          <dd>{bedLabel(bedType)}</dd>
+          <dt>Layer height</dt>
+          <dd>{layerHeight ? `${layerHeight} mm` : "Process default"}</dd>
+          <dt>Infill</dt>
+          <dd>{infill ? `${infill}%` : "Process default"}</dd>
+          <dt>Supports</dt>
+          <dd>{SUPPORT_LABELS[supports]}</dd>
+          {totalObjects > 1 && (
+            <>
+              <dt>Beds</dt>
+              <dd>
+                New bed after {target?.bed_coverage ?? 50}% coverage
+                {target ? "" : " (default)"}; each bed is its own file
+              </dd>
+            </>
+          )}
+        </dl>
+        {blockers.length > 0 ? (
+          <div id="slice-blockers" className="blockers" role="status">
+            <strong className="small">Before you can slice:</strong>
+            <ul className="small">
+              {blockers.map((b) => (
+                <li key={b}>{b}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p id="slice-blockers" className="muted small">
+            Ready to slice.
+          </p>
+        )}
+        <button disabled={busy || blockers.length > 0} aria-describedby="slice-blockers">
+          {busy ? "Submitting…" : "Slice"}
+        </button>
+      </section>
+
       <fieldset className="card stack">
         <legend>Profiles</legend>
         {!presetsLoaded && <p className="muted small">Loading presets…</p>}
@@ -523,51 +577,6 @@ export default function SlicePage() {
           <input type="checkbox" checked={orient} onChange={(e) => setOrient(e.target.checked)} /> Auto-orient
         </label>
       </fieldset>
-
-      {error && <p className="error">{error}</p>}
-
-      <section className="card stack" aria-labelledby="recap-title">
-        <strong id="recap-title">Summary</strong>
-        <dl className="recap small">
-          <dt>Models</dt>
-          <dd>
-            {selectedModels.map((m) => (countOf(m.id) > 1 ? `${m.filename} \u00d7${countOf(m.id)}` : m.filename)).join(", ") ||
-              "\u2014"}
-            {totalObjects > 1 && <span className="muted"> ({totalObjects} objects)</span>}
-          </dd>
-          <dt>Printer</dt>
-          <dd title={printer}>{printer ? displayName(printer) : "—"}</dd>
-          <dt>Process</dt>
-          <dd title={process}>{process ? displayName(process) : "—"}</dd>
-          <dt>Filament</dt>
-          <dd>{chosenFilaments.map(displayName).join(", ") || "—"}</dd>
-          <dt>Plate</dt>
-          <dd>{bedLabel(bedType)}</dd>
-          <dt>Layer height</dt>
-          <dd>{layerHeight ? `${layerHeight} mm` : "Process default"}</dd>
-          <dt>Infill</dt>
-          <dd>{infill ? `${infill}%` : "Process default"}</dd>
-          <dt>Supports</dt>
-          <dd>{SUPPORT_LABELS[supports]}</dd>
-        </dl>
-        {blockers.length > 0 ? (
-          <div id="slice-blockers" className="blockers" role="status">
-            <strong className="small">Before you can slice:</strong>
-            <ul className="small">
-              {blockers.map((b) => (
-                <li key={b}>{b}</li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <p id="slice-blockers" className="muted small">
-            Ready to slice.
-          </p>
-        )}
-        <button disabled={busy || blockers.length > 0} aria-describedby="slice-blockers">
-          {busy ? "Submitting…" : "Slice"}
-        </button>
-      </section>
     </form>
   );
 }

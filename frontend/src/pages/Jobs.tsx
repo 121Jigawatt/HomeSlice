@@ -378,6 +378,7 @@ export function JobPage() {
                 job.stats.filament_g && `${job.stats.filament_g} g`,
                 job.stats.filament_mm && `${job.stats.filament_mm} mm`,
                 job.stats.layers && `${job.stats.layers} layers`,
+                job.stats.plates && `${job.stats.plates} beds`,
               ]
                 .filter(Boolean)
                 .join(" \u00b7 ")}
@@ -473,10 +474,14 @@ export function JobPage() {
 
 function SendToPrinter({ job }: { job: Job }) {
   const notify = useToast();
+  const confirm = useConfirm();
+  const navigate = useNavigate();
   const gcodes = job.files.filter((f) => f.endsWith(".gcode"));
   const [printers, setPrinters] = useState<Printer[] | null>(null);
   const [printerId, setPrinterId] = useState(() => localStorage.getItem("send.printer") ?? "");
-  const [file, setFile] = useState(gcodes[0] ?? "");
+  // "" = every bed: all files are uploaded and only the first one starts.
+  const [file, setFile] = useState(gcodes.length > 1 ? "" : gcodes[0] ?? "");
+  const files = file ? [file] : gcodes;
   const [start, setStart] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -489,7 +494,8 @@ function SendToPrinter({ job }: { job: Job }) {
       .then((list) => {
         setPrinters(list);
         const fits = list.filter((p) => p.printer_preset === job.params.printer);
-        setPrinterId((cur) => (fits.some((p) => p.id === cur) ? cur : fits[0]?.id ?? ""));
+        const ready = list.filter((p) => p.printer_preset);
+        setPrinterId((cur) => (fits.some((p) => p.id === cur) ? cur : fits[0]?.id ?? ready[0]?.id ?? ""));
       })
       .catch((e) => setMsg({ ok: false, text: e.message }));
   }, [job.params.printer]);
@@ -506,20 +512,35 @@ function SendToPrinter({ job }: { job: Job }) {
         Add a printer in <Link to="/settings">Settings</Link> to send prints directly.
       </p>
     );
-  if (!printers.some((p) => p.printer_preset === job.params.printer))
-    return (
-      <div className="card stack">
-        <strong>Send to printer</strong>
-        <p className="small">
-          This was sliced with the <b title={job.params.printer}>{displayName(job.params.printer)}</b> printer profile,
-          and none of your printers use it, so it can't be sent. Re-slice it for one of your printers, or set a
-          printer's profile in <Link to="/settings">Settings</Link>.
+  const chosen = printers.find((p) => p.id === printerId);
+  const fits = !!chosen && chosen.printer_preset === job.params.printer;
+
+  async function reslice() {
+    if (!chosen) return;
+    const ok = await confirm({
+      title: `Re-slice for ${chosen.name}?`,
+      body: (
+        <p>
+          This job was sliced for the {displayName(job.params.printer)} profile, so it can't go to {chosen.name}. Slice
+          the same models again with {chosen.name}'s profile and default process and filament? Your layer height, infill,
+          supports and copies are kept.
         </p>
-        <Link className="button small" to={`/slice?from=${job.id}`}>
-          Re-slice for another printer
-        </Link>
-      </div>
-    );
+      ),
+      confirmLabel: `Re-slice for ${chosen.name}`,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await api<{ id: string }>(`/api/jobs/${job.id}/reslice`, { method: "POST", json: { printer_id: chosen.id } });
+      localStorage.setItem("send.printer", chosen.id);
+      notify(`Re-slicing for ${chosen.name}.`, { tone: "success" });
+      navigate(`/jobs/${r.id}`);
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function send(startNow: boolean) {
     setBusy(true);
@@ -527,12 +548,23 @@ function SendToPrinter({ job }: { job: Job }) {
     setConfirming(false);
     localStorage.setItem("send.printer", printerId);
     try {
-      const r = await api<{ printer: string; filename: string; print_started: boolean }>(`/api/jobs/${job.id}/send`, {
-        method: "POST",
-        json: { printer_id: printerId, file, start: startNow },
-      });
-      setMsg({ ok: true, text: r.print_started ? `Printing on ${r.printer}.` : `Uploaded to ${r.printer} as ${r.filename}.` });
-      notify(r.print_started ? `Print started on ${r.printer}.` : `Sent to ${r.printer}.`, { tone: "success" });
+      let started = false;
+      let printerName = "";
+      for (const [i, f] of files.entries()) {
+        // Only the first bed starts; the others wait on the printer for later.
+        const r = await api<{ printer: string; filename: string; print_started: boolean }>(`/api/jobs/${job.id}/send`, {
+          method: "POST",
+          json: { printer_id: printerId, file: f, start: startNow && i === 0 },
+        });
+        started ||= r.print_started;
+        printerName = r.printer;
+      }
+      const what = files.length > 1 ? `${files.length} beds` : "the file";
+      const text = started
+        ? `Printing bed 1 on ${printerName}${files.length > 1 ? `; ${files.length - 1} more uploaded for later` : ""}.`
+        : `Uploaded ${what} to ${printerName}.`;
+      setMsg({ ok: true, text });
+      notify(text, { tone: "success" });
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message });
       notify(`Send failed: ${(e as Error).message}`, { tone: "error" });
@@ -546,12 +578,14 @@ function SendToPrinter({ job }: { job: Job }) {
     setMsg(null);
     localStorage.setItem("send.printer", printerId);
     try {
-      await api("/api/queue", { method: "POST", json: { job_id: job.id, printer_id: printerId, file } });
+      for (const f of files) {
+        await api("/api/queue", { method: "POST", json: { job_id: job.id, printer_id: printerId, file: f } });
+      }
       const name = printers?.find((p) => p.id === printerId)?.name ?? "the printer";
-      notify(`Queued for ${name}. It starts when ${name} is idle and its bed is confirmed clear.`, {
-        tone: "success",
-        action: { label: "View queue", to: "/jobs#queue" },
-      });
+      notify(
+        `Queued ${files.length > 1 ? `${files.length} beds` : "the print"} for ${name}. Each starts when ${name} is idle and its bed is confirmed clear.`,
+        { tone: "success", action: { label: "View queue", to: "/printers" } },
+      );
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message });
     } finally {
@@ -571,20 +605,48 @@ function SendToPrinter({ job }: { job: Job }) {
             ? "Confirm the bed is clear before starting."
             : null;
 
+  const printerSelect = (
+    <label>
+      Printer
+      <select value={printerId} onChange={(e) => setPrinterId(e.target.value)}>
+        {printers.map((p) => (
+          <option key={p.id} value={p.id} disabled={!p.printer_preset}>
+            {p.name}
+            {!p.printer_preset
+              ? " \u2014 set its profile in Settings"
+              : p.printer_preset !== job.params.printer
+                ? " \u2014 needs re-slicing"
+                : ""}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
+  if (!fits)
+    return (
+      <div className="card stack">
+        <strong>Send to printer</strong>
+        {printerSelect}
+        <div className="reslice-box stack small">
+          <p>
+            This job was sliced for the <b title={job.params.printer}>{displayName(job.params.printer)}</b> profile.
+            {chosen ? ` ${chosen.name} uses ${displayName(chosen.printer_preset ?? "")}, so it needs its own slice.` : ""}
+          </p>
+          {chosen && (
+            <button type="button" onClick={reslice} disabled={busy}>
+              {busy ? "Starting…" : `Re-slice for ${chosen.name}…`}
+            </button>
+          )}
+          {msg && <p className={msg.ok ? "muted" : "error"}>{msg.text}</p>}
+        </div>
+      </div>
+    );
+
   return (
     <div className="card stack">
       <strong>Send to printer</strong>
-      <label>
-        Printer
-        <select value={printerId} onChange={(e) => setPrinterId(e.target.value)}>
-          {printers.map((p) => (
-            <option key={p.id} value={p.id} disabled={p.printer_preset !== job.params.printer}>
-              {p.name}
-              {p.printer_preset !== job.params.printer ? " \u2014 sliced for a different printer" : ""}
-            </option>
-          ))}
-        </select>
-      </label>
+      {printerSelect}
       <div className="row small" aria-live="polite">
         Status: {live ? <PrinterBadge state={live.state} /> : "checking…"}
         {live?.state === "printing" && live.remaining != null && (
@@ -602,10 +664,13 @@ function SendToPrinter({ job }: { job: Job }) {
       ) : null}
       {gcodes.length > 1 && (
         <label>
-          File
+          Beds
           <select value={file} onChange={(e) => setFile(e.target.value)}>
-            {gcodes.map((f) => (
-              <option key={f}>{f}</option>
+            <option value="">All {gcodes.length} beds (bed 1 prints first, the rest wait on the printer)</option>
+            {gcodes.map((f, i) => (
+              <option key={f} value={f}>
+                Only bed {i + 1} ({f})
+              </option>
             ))}
           </select>
         </label>
@@ -645,14 +710,14 @@ function SendToPrinter({ job }: { job: Job }) {
         <div className="row">
           <button
             className="grow"
-            disabled={busy || !printerId || !file || !live?.connected}
+            disabled={busy || !printerId || !files.length || !live?.connected}
             onClick={() => (start && canStart ? setConfirming(true) : send(false))}
           >
             {busy ? "Sending…" : start && canStart ? "Send & print…" : "Upload to printer"}
           </button>
           <button
             className="secondary grow"
-            disabled={busy || !printerId || !file}
+            disabled={busy || !printerId || !files.length}
             onClick={enqueue}
             title="Prints automatically once this printer is idle and you've confirmed its bed is clear."
           >

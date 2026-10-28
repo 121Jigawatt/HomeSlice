@@ -22,7 +22,7 @@ async function loadModel(m: PreviewModel): Promise<THREE.Object3D> {
   // 3MF loader can't follow Bambu Studio's multi-file objects.
   const isStep = m.ext === ".step" || m.ext === ".stp";
   const viaServer = isStep || m.ext === ".3mf";
-  const url = viaServer ? `/api/library/${m.id}/mesh?plate=${m.plate ?? 0}` : `/api/library/${m.id}/file`;
+  const url = viaServer ? `/api/library/${m.id}/mesh?plate=${Math.max(0, m.plate ?? 0)}` : `/api/library/${m.id}/file`;
   const res = await fetch(url, { credentials: "same-origin" });
   if (!res.ok) {
     const detail = await res.json().then((j) => j.detail as string).catch(() => "");

@@ -93,6 +93,7 @@ ADDED_COLUMNS = [
     ("printers", "default_process", "TEXT"),
     ("printers", "default_filaments", "TEXT"),
     ("printers", "default_bed_type", "TEXT"),
+    ("printers", "bed_coverage", "INTEGER NOT NULL DEFAULT 50"),
 ]
 
 

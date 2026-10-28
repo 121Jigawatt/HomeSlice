@@ -199,6 +199,7 @@ class ProfilesBody(BaseModel):
     process: str | None = Field(default=None, max_length=200)
     filaments: list[str] = Field(default_factory=list, max_length=16)
     bed_type: str | None = Field(default=None, max_length=64)
+    bed_coverage: int = Field(default=50, ge=10, le=100)
 
 
 @router.put("/printers/{printer_id}/profiles")
@@ -231,7 +232,9 @@ def set_printer_profiles(
     for f in filaments:
         if f not in known["filament"] or f in bad["filament"]:
             raise HTTPException(400, f'Filament "{f}" doesn\'t suit "{preset}"')
-    services.printers.set_profiles(printer_id, preset, process, filaments, (body.bed_type or "").strip() or None)
+    services.printers.set_profiles(
+        printer_id, preset, process, filaments, (body.bed_type or "").strip() or None, body.bed_coverage
+    )
     services.auth.audit(session.username, "printer_profiles", f"{printer['name']} -> {preset}", client_ip(request))
     return services.printers.get(printer_id)
 

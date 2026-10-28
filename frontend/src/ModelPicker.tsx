@@ -88,7 +88,8 @@ export function ModelPicker({
                           {p.name ? `: ${p.name}` : ""} ({p.objects} object{p.objects === 1 ? "" : "s"})
                         </option>
                       ))}
-                      <option value={0}>All plates together</option>
+                      <option value={0}>All plates, arranged together</option>
+                      <option value={-1}>Every plate, each on its own bed</option>
                     </select>
                   </label>
                 )}

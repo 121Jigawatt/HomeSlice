@@ -194,6 +194,8 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 
 .import-go { align-self: flex-end; }
 .send-cam p { margin: 0 0 0.35rem; }
+.reslice-box { border-left: 3px solid var(--accent); padding-left: 0.6rem; }
+.reslice-box p { margin: 0; }
 .gcode-legend { gap: 0.9rem; color: var(--muted); }
 .gcode-legend i { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 3px; vertical-align: -1px; margin-right: 0.3rem; }
 .printer-strip.expanded .printer-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); }

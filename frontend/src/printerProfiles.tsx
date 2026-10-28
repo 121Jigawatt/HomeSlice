@@ -13,6 +13,7 @@ export function PrinterProfiles({ printer, onSaved }: { printer: Printer; onSave
   const [process, setProcess] = useState(printer.default_process ?? "");
   const [filaments, setFilaments] = useState<string[]>(printer.default_filaments.length ? printer.default_filaments : [""]);
   const [bedType, setBedType] = useState(printer.default_bed_type ?? "");
+  const [coverage, setCoverage] = useState(String(printer.bed_coverage ?? 50));
   const [incompat, setIncompat] = useState<Incompat>({ process: {}, filament: {} });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +40,13 @@ export function PrinterProfiles({ printer, onSaved }: { printer: Printer; onSave
     try {
       const saved = await api<Printer>(`/api/printers/${printer.id}/profiles`, {
         method: "PUT",
-        json: { printer_preset: preset || null, process: process || null, filaments: filaments.filter(Boolean), bed_type: bedType || null },
+        json: {
+          printer_preset: preset || null,
+          process: process || null,
+          filaments: filaments.filter(Boolean),
+          bed_type: bedType || null,
+          bed_coverage: Math.min(100, Math.max(10, Math.round(Number(coverage) || 50))),
+        },
       });
       notify(`Saved profiles for ${printer.name}.`, { tone: "success" });
       onSaved(saved);
@@ -118,6 +125,22 @@ export function PrinterProfiles({ printer, onSaved }: { printer: Printer; onSave
         )}
       </div>
       {error && <p className="error span-2">{error}</p>}
+      <label className="span-2">
+        Bed coverage before starting a new bed (%)
+        <input
+          type="number"
+          min={10}
+          max={100}
+          step={5}
+          value={coverage}
+          onChange={(e) => setCoverage(e.target.value)}
+          aria-describedby={`coverage-help-${printer.id}`}
+        />
+        <span id={`coverage-help-${printer.id}`} className="muted small">
+          When several models are sliced together, they fill one bed until their footprints cover this much of it;
+          the rest go on another bed, saved as a separate file. Default 50%.
+        </span>
+      </label>
       <button className="small span-2" disabled={busy}>
         {busy ? "Saving…" : "Save profiles"}
       </button>

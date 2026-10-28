@@ -113,7 +113,8 @@ export interface Job {
   owner: string | null;
   error: string | null;
   error_info: ErrorInfo | null;
-  stats: Record<string, string> | null;
+  // Totals across beds; multi-bed jobs also carry "plates" and "per_plate".
+  stats: (Record<string, string> & { plates?: number; per_plate?: Record<string, string>[] }) | null;
   params: {
     model_ids: string[];
     copies?: number[];
@@ -150,6 +151,7 @@ export interface Printer {
   default_process: string | null;
   default_filaments: string[];
   default_bed_type: string | null;
+  bed_coverage: number;
 }
 
 export interface PrinterStatus {

@@ -17,8 +17,10 @@ import uuid
 import zipfile
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
+from ..library import threemf
 from ..library.thumbnails import _root_model, _ThreeMF, render
 
 log = logging.getLogger(__name__)
@@ -74,12 +76,18 @@ def _has_thumbnails(gcode: Path) -> bool:
         return b"; thumbnail begin" in f.read(512 * 1024)
 
 
-def embed(gcode: Path, plate_3mf: Path, printer_json: Path) -> bool:
-    """Adds preview images to gcode in place. Returns False when it already had them or nothing could be drawn."""
+def embed(gcode: Path, plate_3mf: Path, printer_json: Path, plate: int = 0) -> bool:
+    """Adds preview images to gcode in place, drawing only `plate` of a multi-bed export when given.
+
+    Returns False when it already had them or nothing could be drawn.
+    """
     if _has_thumbnails(gcode) or not plate_3mf.is_file():
         return False
-    with zipfile.ZipFile(plate_3mf) as zf:
-        image = render(_ThreeMF(zf).triangles(_root_model(zf)))
+    if plate and len(threemf.plates(plate_3mf)) > 1:
+        image = render(np.concatenate(threemf.item_meshes(plate_3mf, plate)))
+    else:
+        with zipfile.ZipFile(plate_3mf) as zf:
+            image = render(_ThreeMF(zf).triangles(_root_model(zf)))
     block = thumbnail_block(image, thumbnail_sizes(printer_json)).encode("ascii")
 
     tmp = gcode.with_name(f"{gcode.name}.{uuid.uuid4().hex}.tmp")

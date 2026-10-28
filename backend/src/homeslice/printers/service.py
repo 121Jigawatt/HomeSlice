@@ -36,6 +36,8 @@ WEBCAM_TTL_S = 60.0
 # How long a verified hostname->IP mapping is trusted before re-checking /printer/info.
 VERIFY_TTL_S = 60.0
 ACTIVE_STATES = {"printing", "paused"}
+# % of the bed objects may cover before the rest go to another bed.
+DEFAULT_BED_COVERAGE = 50
 # A print that ended in one of these may still be on the bed.
 FINISHED_STATES = {"complete", "cancelled", "error"}
 FINISHED_REASON = {
@@ -90,6 +92,7 @@ class Printers:
             "default_process": row["default_process"],
             "default_filaments": json.loads(row["default_filaments"] or "[]"),
             "default_bed_type": row["default_bed_type"],
+            "bed_coverage": row["bed_coverage"] if row["bed_coverage"] is not None else DEFAULT_BED_COVERAGE,
             "created_at": row["created_at"],
         }
 
@@ -119,6 +122,7 @@ class Printers:
             "default_process": None,
             "default_filaments": None,
             "default_bed_type": None,
+            "bed_coverage": DEFAULT_BED_COVERAGE,
             "created_at": time.time(),
         }
         self._db.execute(
@@ -140,12 +144,13 @@ class Printers:
         process: str | None,
         filaments: list[str],
         bed_type: str | None,
+        bed_coverage: int = 50,
     ) -> bool:
         return (
             self._db.execute(
-                "UPDATE printers SET printer_preset=?, default_process=?, default_filaments=?, default_bed_type=? "
-                "WHERE id=?",
-                (printer_preset, process, json.dumps(filaments), bed_type, parse_printer_id(printer_id)),
+                "UPDATE printers SET printer_preset=?, default_process=?, default_filaments=?, default_bed_type=?, "
+                "bed_coverage=? WHERE id=?",
+                (printer_preset, process, json.dumps(filaments), bed_type, bed_coverage, parse_printer_id(printer_id)),
             )
             > 0
         )
