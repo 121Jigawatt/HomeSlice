@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import ipaddress
 import socket
@@ -23,6 +25,10 @@ from .moonraker import (
 KINDS = ("moonraker",)
 SCAN_SUBNET_KEY = "printers.scan_subnet"
 SCAN_CONCURRENCY = 64
+# Several open tabs share one round of printer queries.
+LIVE_TTL_S = 2.0
+WEBCAM_TTL_S = 60.0
+ACTIVE_STATES = {"printing", "paused"}
 
 
 def parse_printer_id(printer_id: str) -> str:
@@ -45,6 +51,11 @@ class Printers:
         self._db = db
         self._secrets = secrets
         self._locks: dict[str, asyncio.Lock] = {}
+        self._live: list[dict[str, Any]] = []
+        self._live_at = 0.0
+        self._live_lock = asyncio.Lock()
+        self._estimates: dict[tuple[str, str], float | None] = {}
+        self._webcams: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         # Overridable in tests.
         self.transport: httpx.AsyncBaseTransport | None = None
         self.resolve = True
@@ -88,10 +99,66 @@ class Printers:
             "VALUES(:id, :name, :kind, :url, :api_key, :resolved_ip, :created_at)",
             record,
         )
+        self._live_at = 0.0
         return self._public(record)
 
     def delete(self, printer_id: str) -> bool:
+        self._live_at = 0.0
         return self._db.execute("DELETE FROM printers WHERE id=?", (parse_printer_id(printer_id),)) > 0
+
+    async def live(self) -> list[dict[str, Any]]:
+        async with self._live_lock:
+            if time.monotonic() - self._live_at < LIVE_TTL_S:
+                return self._live
+            printers = self.list()
+            self._live = list(await asyncio.gather(*(self._live_one(p) for p in printers)))
+            self._live_at = time.monotonic()
+            return self._live
+
+    async def _live_one(self, printer: dict[str, Any]) -> dict[str, Any]:
+        base = {"id": printer["id"], "name": printer["name"]}
+        try:
+            client = await self.client(printer["id"])
+            t = await client.telemetry()
+            remaining = None
+            if t["state"] in ACTIVE_STATES and t["filename"]:
+                key = (printer["id"], t["filename"])
+                if key not in self._estimates:
+                    self._estimates[key] = await client.estimated_time(t["filename"])
+                estimate, elapsed, progress = self._estimates[key], t["elapsed"], t["progress"]
+                if estimate and elapsed is not None:
+                    remaining = max(estimate - elapsed, 0.0)
+                elif progress and progress > 0.01 and elapsed:
+                    remaining = elapsed / progress - elapsed
+            return {
+                **base,
+                **t,
+                "connected": True,
+                "error": None,
+                "remaining": remaining,
+                "address": urlsplit(client.base_url).hostname,
+                "webcams": [c["name"] for c in await self._webcam_list(printer["id"], client)],
+            }
+        except PrinterError as e:
+            return {**base, "connected": False, "error": str(e), "state": "offline", "webcams": []}
+
+    async def _webcam_list(self, pid: str, client: MoonrakerClient) -> list[dict[str, Any]]:
+        cached = self._webcams.get(pid)
+        if cached and time.monotonic() - cached[0] < WEBCAM_TTL_S:
+            return cached[1]
+        cams = await client.webcams()
+        self._webcams[pid] = (time.monotonic(), cams)
+        return cams
+
+    async def webcam_source(self, printer_id: str, index: int, snapshot: bool) -> tuple[MoonrakerClient, str]:
+        client = await self.client(printer_id)
+        cams = await self._webcam_list(parse_printer_id(printer_id), client)
+        if not 0 <= index < len(cams):
+            raise PrinterError("Unknown webcam")
+        raw = cams[index]["snapshot_url" if snapshot else "stream_url"] or cams[index]["stream_url"]
+        if not raw:
+            raise PrinterError("Webcam has no address")
+        return client, client.webcam_url(raw)
 
     def scan_subnet(self) -> str | None:
         return self._db.get_setting(SCAN_SUBNET_KEY) or None

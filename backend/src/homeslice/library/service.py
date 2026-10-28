@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ..config import Settings
 from ..db import Database
+from .thumbnails import Thumbnails
 from .validation import ValidationError, normalize_ext, safe_display_name, validate_file
 
 
@@ -26,6 +27,7 @@ class Library:
         self._db = db
         self._settings = settings
         self._max_bytes = settings.max_upload_mb * 1024**2
+        self.thumbnails = Thumbnails(settings.thumbs_dir)
 
     def path_for(self, model_id: str) -> Path | None:
         row = self._db.one("SELECT id, ext FROM models WHERE id=?", (parse_model_id(model_id),))
@@ -74,14 +76,24 @@ class Library:
             "VALUES(:id, :filename, :ext, :size, :sha256, :source_url, :license, :created_at)",
             record,
         )
-        return record
+        self.thumbnails.schedule(model_id, self._settings.library_dir / f"{model_id}{ext}", ext)
+        return {**record, "has_thumbnail": False}
+
+    def _public(self, row) -> dict:
+        return {**dict(row), "has_thumbnail": self.thumbnails.exists(row["id"])}
 
     def list(self) -> list[dict]:
-        return [dict(r) for r in self._db.all("SELECT * FROM models ORDER BY created_at DESC")]
+        return [self._public(r) for r in self._db.all("SELECT * FROM models ORDER BY created_at DESC")]
 
     def get(self, model_id: str) -> dict | None:
         row = self._db.one("SELECT * FROM models WHERE id=?", (parse_model_id(model_id),))
-        return dict(row) if row else None
+        return self._public(row) if row else None
+
+    def backfill_thumbnails(self) -> int:
+        missing = self.thumbnails.missing([dict(r) for r in self._db.all("SELECT id, ext FROM models")])
+        for m in missing:
+            self.thumbnails.schedule(m["id"], self._settings.library_dir / f"{m['id']}{m['ext']}", m["ext"])
+        return len(missing)
 
     def delete(self, model_id: str) -> bool:
         path = self.path_for(model_id)
@@ -89,4 +101,5 @@ class Library:
             return False
         self._db.execute("DELETE FROM models WHERE id=?", (parse_model_id(model_id),))
         path.unlink(missing_ok=True)
+        self.thumbnails.delete(parse_model_id(model_id))
         return True

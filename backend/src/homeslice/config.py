@@ -42,6 +42,10 @@ class Settings(BaseSettings):
         return self.data_dir / "jobs"
 
     @property
+    def thumbs_dir(self) -> Path:
+        return self.data_dir / "thumbs"
+
+    @property
     def tmp_dir(self) -> Path:
         return self.data_dir / "tmp"
 
@@ -54,5 +58,5 @@ class Settings(BaseSettings):
         return self.config_dir / "homeslice.db"
 
     def ensure_dirs(self) -> None:
-        for d in (self.config_dir, self.library_dir, self.jobs_dir, self.tmp_dir, self.orca_dir):
+        for d in (self.config_dir, self.library_dir, self.jobs_dir, self.tmp_dir, self.orca_dir, self.thumbs_dir):
             d.mkdir(parents=True, exist_ok=True)

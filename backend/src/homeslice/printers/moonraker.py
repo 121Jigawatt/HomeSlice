@@ -3,7 +3,7 @@ import ipaddress
 import socket
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -196,3 +196,96 @@ class MoonrakerClient:
             "filename": remote_name,
             "print_started": bool(result.get("print_started")) if isinstance(result, dict) else False,
         }
+
+    async def telemetry(self) -> dict[str, Any]:
+        result = await self._request(
+            "GET", "/printer/objects/query?print_stats&display_status&virtual_sdcard&extruder&heater_bed"
+        )
+        objects = result.get("status", {}) if isinstance(result, dict) else {}
+
+        def obj(name: str) -> dict[str, Any]:
+            value = objects.get(name)
+            return value if isinstance(value, dict) else {}
+
+        stats = obj("print_stats")
+        progress = obj("display_status").get("progress")
+        if not progress:
+            progress = obj("virtual_sdcard").get("progress")
+        return {
+            "state": str(stats.get("state", "unknown")),
+            "filename": stats.get("filename") or None,
+            "message": stats.get("message") or None,
+            "progress": _num(progress),
+            "elapsed": _num(stats.get("print_duration")),
+            "extruder": _temps(obj("extruder")),
+            "bed": _temps(obj("heater_bed")),
+        }
+
+    async def estimated_time(self, filename: str) -> float | None:
+        try:
+            result = await self._request("GET", "/server/files/metadata", params={"filename": filename})
+        except PrinterError:
+            return None
+        return _num(result.get("estimated_time")) if isinstance(result, dict) else None
+
+    async def webcams(self) -> list[dict[str, Any]]:
+        try:
+            result = await self._request("GET", "/server/webcams/list")
+        except PrinterError:
+            return []
+        cams = result.get("webcams") if isinstance(result, dict) else None
+        return [
+            {
+                "name": str(c.get("name") or f"Camera {i + 1}")[:64],
+                "stream_url": c.get("stream_url") if isinstance(c.get("stream_url"), str) else None,
+                "snapshot_url": c.get("snapshot_url") if isinstance(c.get("snapshot_url"), str) else None,
+            }
+            for i, c in enumerate(cams or [])
+            if isinstance(c, dict) and c.get("enabled", True)
+        ]
+
+    def webcam_url(self, raw: str) -> str:
+        """Webcam URLs may be relative or point at another port, but never at another host."""
+        url = urljoin(self._base + "/", raw.strip())
+        parts, base = urlsplit(url), urlsplit(self._base)
+        if parts.scheme not in ("http", "https") or parts.username or parts.password:
+            raise PrinterError("Unsupported webcam address")
+        if parts.hostname != base.hostname:
+            raise PrinterError("Webcam must be served by the printer itself")
+        check_lan_ip(parts.hostname or "")
+        return url
+
+    async def open_stream(self, url: str) -> tuple[httpx.AsyncClient, httpx.Response]:
+        """Caller must close both. Only image or MJPEG responses are accepted."""
+        client = httpx.AsyncClient(
+            transport=self._transport,
+            timeout=httpx.Timeout(10.0, read=30.0),
+            follow_redirects=False,
+            trust_env=False,
+        )
+        try:
+            response = await client.send(client.build_request("GET", url), stream=True)
+            self._check_peer(response)
+            ctype = response.headers.get("content-type", "").lower()
+            if response.status_code != 200 or not (
+                ctype.startswith("image/") or ctype.startswith("multipart/x-mixed-replace")
+            ):
+                await response.aclose()
+                raise PrinterError(f"Webcam returned HTTP {response.status_code} ({ctype or 'no type'})")
+        except httpx.HTTPError as e:
+            await client.aclose()
+            raise PrinterError(f"Cannot reach webcam ({type(e).__name__})") from None
+        except BaseException:
+            await client.aclose()
+            raise
+        return client, response
+
+
+def _num(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _temps(heater: dict[str, Any]) -> dict[str, float | None] | None:
+    if not heater:
+        return None
+    return {"temp": _num(heater.get("temperature")), "target": _num(heater.get("target"))}

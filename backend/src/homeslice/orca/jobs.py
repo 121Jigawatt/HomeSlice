@@ -149,6 +149,19 @@ class JobManager:
         job["params"] = json.loads(job["params"])
         job["stats"] = json.loads(job["stats"]) if job["stats"] else None
         job["files"] = self.output_files(job["id"])
+        job["models"] = []
+        for mid in job["params"].get("model_ids") or []:
+            try:
+                record = self._library.get(mid)
+            except ValueError:
+                record = None
+            job["models"].append(
+                {
+                    "id": mid,
+                    "filename": record["filename"] if record else None,
+                    "has_thumbnail": bool(record and record["has_thumbnail"]),
+                }
+            )
         return job
 
     def list(self, limit: int = 50) -> list[dict[str, Any]]:

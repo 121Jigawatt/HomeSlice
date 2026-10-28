@@ -56,6 +56,13 @@ class FakeMoonraker:
         # When set, only this address answers (simulates one printer on a LAN).
         self.ip: str | None = None
         self.hostname = "SPI-XI"
+        self.filename = ""
+        self.webcam = {
+            "name": "cam",
+            "enabled": True,
+            "stream_url": "/webcam/?action=stream",
+            "snapshot_url": "/webcam/?action=snapshot",
+        }
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -64,8 +71,20 @@ class FakeMoonraker:
         if request.url.path == "/printer/info":
             return httpx.Response(200, json={"result": {"hostname": self.hostname, "state": "ready"}})
         if request.url.path == "/printer/objects/query":
-            status = {"print_stats": {"state": self.state, "filename": ""}, "display_status": {"progress": 0.0}}
+            status = {
+                "print_stats": {"state": self.state, "filename": self.filename, "print_duration": 600.0},
+                "display_status": {"progress": 0.25},
+                "extruder": {"temperature": 254.6, "target": 255.0},
+                "heater_bed": {"temperature": 80.1, "target": 80.0},
+            }
             return httpx.Response(200, json={"result": {"status": status}})
+        if request.url.path == "/server/files/metadata":
+            return httpx.Response(200, json={"result": {"estimated_time": 2400.0}})
+        if request.url.path == "/server/webcams/list":
+            return httpx.Response(200, json={"result": {"webcams": [self.webcam]}})
+        if request.url.path == "/webcam/":
+            ctype = "image/jpeg" if request.url.params.get("action") == "snapshot" else "multipart/x-mixed-replace; boundary=frame"
+            return httpx.Response(200, headers={"content-type": ctype}, content=b"JPEGDATA")
         if request.url.path == "/server/files/upload":
             started = b'name="print"' in request.content
             return httpx.Response(201, json={"result": {"print_started": started, "item": {}}})
@@ -240,3 +259,51 @@ def test_db_migration_adds_column(tmp_path):
     db = Database(path)
     assert "resolved_ip" in {r["name"] for r in db.all("PRAGMA table_info(printers)")}
     db.close()
+
+
+def test_live_status_while_printing(printer_setup):
+    authed, fake, printer = printer_setup
+    fake.state, fake.filename = "printing", "benchy.gcode"
+    r = authed.get("/api/printers/live")
+    assert r.status_code == 200, r.text
+    live = r.json()[0]
+    assert live["name"] == "SV08" and live["connected"] is True and live["state"] == "printing"
+    assert live["filename"] == "benchy.gcode" and live["progress"] == 0.25
+    assert live["remaining"] == 1800.0  # estimated 2400s - 600s elapsed
+    assert live["extruder"] == {"temp": 254.6, "target": 255.0} and live["bed"]["target"] == 80.0
+    assert live["webcams"] == ["cam"]
+
+
+def test_live_status_offline(authed):
+    services = authed.app.state.services
+
+    def down(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    services.printers.transport = httpx.MockTransport(down)
+    services.printers.resolve = False
+    authed.post("/api/printers", json={"name": "Frank", "url": "http://10.69.69.50"})
+    live = authed.get("/api/printers/live").json()[0]
+    assert live["connected"] is False and live["state"] == "offline" and "Cannot reach" in live["error"]
+
+
+def test_webcam_relay(printer_setup):
+    authed, _, printer = printer_setup
+    r = authed.get(f"/api/printers/{printer['id']}/webcam/0", params={"snapshot": "true"})
+    assert r.status_code == 200 and r.content == b"JPEGDATA" and r.headers["content-type"] == "image/jpeg"
+    r = authed.get(f"/api/printers/{printer['id']}/webcam/0")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("multipart/x-mixed-replace")
+
+
+def test_webcam_on_other_host_refused(printer_setup):
+    authed, fake, printer = printer_setup
+    fake.webcam = {"name": "cam", "stream_url": "http://10.0.0.99/stream", "snapshot_url": None}
+    r = authed.get(f"/api/printers/{printer['id']}/webcam/0")
+    assert r.status_code == 502 and "printer itself" in r.json()["detail"]
+    assert authed.get(f"/api/printers/{printer['id']}/webcam/5").status_code == 502
+
+
+def test_webcam_requires_login(printer_setup):
+    authed, _, printer = printer_setup
+    authed.cookies.clear()
+    assert authed.get(f"/api/printers/{printer['id']}/webcam/0").status_code == 401

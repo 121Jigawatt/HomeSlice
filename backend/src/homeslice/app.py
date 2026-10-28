@@ -153,6 +153,8 @@ def create_app(settings: Settings | None = None, *, start_background: bool = Tru
         app.state.services = services
         services.auth.ensure_setup_token()
         services.jobs.start()
+        if n := services.library.backfill_thumbnails():
+            log.info("Generating %d missing model thumbnails", n)
         if start_background:
             task = asyncio.create_task(update_checker(services))
             services.background_tasks.add(task)

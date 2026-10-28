@@ -48,6 +48,18 @@ def download_model(model_id: str, request: Request, _: Session = Depends(require
     return FileResponse(path, filename=record["filename"], media_type="application/octet-stream")
 
 
+@router.get("/{model_id}/thumbnail")
+def model_thumbnail(model_id: str, request: Request, _: Session = Depends(require_session)) -> FileResponse:
+    library = request.app.state.services.library
+    try:
+        record = library.get(model_id)
+    except ValidationError:
+        raise HTTPException(404, "Not found") from None
+    if record is None or not record["has_thumbnail"]:
+        raise HTTPException(404, "No thumbnail")
+    return FileResponse(library.thumbnails.path(record["id"]), media_type="image/png")
+
+
 @router.delete("/{model_id}", status_code=204)
 def delete_model(model_id: str, request: Request, session: Session = Depends(require_session)) -> None:
     services = request.app.state.services

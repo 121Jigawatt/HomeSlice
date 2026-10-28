@@ -4,6 +4,7 @@ from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..auth import Session
@@ -50,6 +51,46 @@ def _remote_name(services, job: dict, file: str) -> str:
 @router.get("/printers")
 def list_printers(request: Request, _: Session = Depends(require_session)) -> list[dict]:
     return request.app.state.services.printers.list()
+
+
+@router.get("/printers/live")
+async def printers_live(request: Request, _: Session = Depends(require_session)) -> list[dict]:
+    return await request.app.state.services.printers.live()
+
+
+@router.get("/printers/{printer_id}/webcam/{index}")
+async def printer_webcam(
+    printer_id: str,
+    index: int,
+    request: Request,
+    snapshot: bool = False,
+    _: Session = Depends(require_session),
+) -> StreamingResponse:
+    """Relays the printer's own webcam so it can be shown on the HTTPS page."""
+    printers = request.app.state.services.printers
+    try:
+        if printers.get(printer_id) is None:
+            raise HTTPException(404, "Not found")
+        client, url = await printers.webcam_source(printer_id, index, snapshot)
+        http, upstream = await client.open_stream(url)
+    except PrinterError as e:
+        raise HTTPException(502, str(e)) from None
+
+    async def body():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                if await request.is_disconnected():
+                    break
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await http.aclose()
+
+    return StreamingResponse(
+        body(),
+        media_type=upstream.headers.get("content-type"),
+        headers={"X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/printers/settings")
