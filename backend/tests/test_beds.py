@@ -15,9 +15,9 @@ from homeslice.orca.cli import RunResult
 from homeslice.library.thumbnails import footprint_mm2
 from homeslice.orca.jobs import JobRequest, bed_area, combine_stats
 
-SQUARE_100 = [  # 100 x 100 mm footprint, two triangles
-    [[0, 0, 0], [100, 0, 0], [100, 100, 0]],
-    [[0, 0, 0], [100, 100, 0], [0, 100, 5]],
+SQUARE_100 = [  # 92 x 92 mm, so 100 x 100 mm footprint with the 8 mm arrange spacing; two triangles
+    [[0, 0, 0], [92, 0, 0], [92, 92, 0]],
+    [[0, 0, 0], [92, 92, 0], [0, 92, 5]],
 ]
 
 

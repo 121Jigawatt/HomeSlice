@@ -7,6 +7,7 @@ import { ACCENT, buildPlate, createViewer, plateBox, Viewer } from "./scene";
 
 // Browsers struggle to parse meshes far beyond this; the slicer itself has no such limit.
 const MAX_PREVIEW_BYTES = 120 * 1024 ** 2;
+// Same spacing the server adds to each footprint when planning beds (ARRANGE_SPACING_MM).
 const GAP = 8;
 
 interface Bed {

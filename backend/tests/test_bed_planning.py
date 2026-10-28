@@ -19,13 +19,13 @@ def test_parts_endpoint_and_item_mesh(authed, tmp_path):
     mid = authed.post("/api/library", params={"filename": "Ring.3mf"}, content=bambu_project(tmp_path / "r.3mf").read_bytes()).json()["id"]
     parts = authed.get(f"/api/library/{mid}/parts").json()
     assert [(p["item"], p["plate"]) for p in parts] == [(1, 1), (2, 2), (3, 2)]
-    assert all(p["footprint"] == 100 for p in parts)  # bounding box of the 10 x 10 mm triangle
+    assert all(p["footprint"] == 18 * 18 for p in parts)  # 10 x 10 mm bounding box plus 8 mm arrange spacing
     mesh = authed.get(f"/api/library/{mid}/mesh", params={"item": 2})
     assert mesh.status_code == 200 and int(np.frombuffer(mesh.content[80:84], "<u4")[0]) == 1
     assert authed.get(f"/api/library/{mid}/mesh", params={"item": 9}).status_code == 422
 
     stl = authed.post("/api/library", params={"filename": "a.stl"}, content=binary_stl()).json()["id"]
-    assert authed.get(f"/api/library/{stl}/parts").json() == [{"item": 0, "plate": 0, "footprint": 0.0}]
+    assert authed.get(f"/api/library/{stl}/parts").json() == [{"item": 0, "plate": 0, "footprint": 64.0}]  # flat test triangle: just the spacing
 
 
 def test_slice_coverage_override(authed, settings):

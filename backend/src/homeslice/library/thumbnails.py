@@ -308,8 +308,13 @@ def render(tris: np.ndarray) -> Image.Image:
     return Image.fromarray(pixels, "RGBA").resize((SIZE, SIZE), Image.LANCZOS)
 
 
+# Gap kept around each object when arranging; matches GAP in frontend/src/viewer/ModelViewer.tsx.
+ARRANGE_SPACING_MM = 8.0
+
+
 def footprint_mm2(mesh: Path) -> float:
-    """XY bounding-box area of a mesh as stored (arrange may rotate it, so this is an estimate)."""
+    """Bed area an object takes up once arranged: its whole XY bounding box plus the spacing around it
+    (arrange may rotate it, so this is an estimate)."""
     tris = load_stl(mesh) if mesh.suffix.lower() == ".stl" else load_obj(mesh)
     lo, hi = np.full(2, np.inf), np.full(2, -np.inf)
     for start in range(0, len(tris), 500_000):
@@ -319,7 +324,7 @@ def footprint_mm2(mesh: Path) -> float:
             lo, hi = np.minimum(lo, pts.min(axis=0)), np.maximum(hi, pts.max(axis=0))
     if not np.isfinite(lo).all():
         return 0.0
-    w, h = hi - lo
+    w, h = hi - lo + ARRANGE_SPACING_MM
     return float(w * h)
 
 
