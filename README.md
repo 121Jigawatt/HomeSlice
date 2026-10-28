@@ -18,9 +18,25 @@ Volumes: `/config` holds OrcaSlicer presets, the database, the secret key and th
 
 1. Push this repo to GitHub. The CI workflow builds `ghcr.io/<you>/homeslice`. Make the package public, or add GHCR credentials in TrueNAS.
 2. Go to **Apps → Discover Apps → ⋮ → Install via YAML** and paste [deploy/truenas/docker-compose.yaml](deploy/truenas/docker-compose.yaml). Storage is created automatically in the apps pool's `ix-apps` dataset. To use your own datasets instead, replace the two named volumes with host paths.
-3. Open the app logs and copy the **setup token** line. Then browse to `https://<nas>:8443`, accept the self-signed certificate warning, and create your admin account.
+3. Open the app logs and copy the **setup token** line. Then browse to `https://<nas>:8443`, accept the certificate warning, and create your admin account.
 4. OrcaSlicer (stable channel) is downloaded and installed automatically on first start. Progress and the installed version are shown under **Settings**, where you can also switch channels or roll back.
-5. Open **Full Orca** once to import or create your printer, filament and process presets. They then appear on the **Slice** page.
+5. Open **Advanced: full OrcaSlicer** once to import or create your printer, filament and process presets. They then appear on the **Slice** page. The Library page shows a checklist until this is all done.
+
+### HTTPS certificate and installing as an app
+
+On first start HomeSlice creates its own small certificate authority (`/config/ssl/homeslice-ca.pem`) and uses it to issue the HTTPS certificate. Put every address you open HomeSlice by into `HOMESLICE_TLS_HOSTS` (comma-separated IPs or hostnames, e.g. `10.69.69.12,homeslice.lan`); the certificate is re-issued automatically when that list changes and before it expires.
+
+Until a device trusts that authority, the browser shows a warning and HomeSlice can't be installed as an app or open offline. The app shows a banner on such devices with a **Download certificate** button (`/homeslice-ca.crt`) and step-by-step instructions for iPhone/iPad, Android, Windows, macOS and Firefox. After that, use **Add to Home Screen** (iOS) or **Install app** (Chrome/Edge). The CA key never leaves `/config/ssl` and is readable only by root inside the container.
+
+### Push notifications (not implemented: findings)
+
+Web Push is possible but only under conditions that don't hold for most installs today:
+
+- It needs a service worker, which browsers only allow on a **trusted** certificate, so every device must first install the HomeSlice CA (above).
+- On iPhone/iPad it works only for a site **added to the Home Screen** (iOS 16.4+), and the user must allow notifications from inside that installed app.
+- The NAS must reach the browser vendors' push services on the internet (Apple, Google, Mozilla), and HomeSlice would need VAPID keys plus a subscription store.
+
+Until then, finished slices, failed slices and send results are shown as in-app notifications, and printer state changes are announced to screen readers. Notifications can be revisited once the trusted-certificate setup has been used for a while.
 
 ### Remote access (phone away from home)
 
@@ -61,9 +77,10 @@ Frontend (needs Node 22): `cd frontend; npm install; npm run dev`, then open htt
 ## Status / roadmap
 
 - [x] Phase 1–2: container, version manager, auth, library, slicing queue, streamed GUI
-- [x] Phase 3 (basic): mobile UI for library, slicing, jobs and settings
-- [ ] Phase 3: 3D plate viewer and G-code preview
-- [x] Phase 4 (part): send to Klipper/Moonraker printers (Mainsail, Fluidd), optional auto-start
+- [x] Phase 3: mobile, tablet and desktop UI for library, slicing, jobs and settings; 3D plate viewer and G-code preview
+- [x] Phase 4 (part): Klipper/Moonraker printers (Mainsail, Fluidd): live status, webcams, send/auto-start, per-printer queue with a "bed is clear" safety check
 - [ ] Phase 4: other printer connectors (OctoPrint, PrusaLink, Bambu LAN, Creality)
-- [ ] Phase 5: model browser (Thingiverse, Printables, share-to-app import)
+- [x] Phase 5 (part): Printables / MakerWorld link import
+- [ ] Multiple user accounts
+- [ ] Push notifications (see findings above)
 - [ ] Phase 0 checks to run on real hardware: headless CLI inside the container, preset flattening accepted by the CLI

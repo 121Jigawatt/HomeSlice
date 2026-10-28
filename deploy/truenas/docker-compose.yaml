@@ -15,6 +15,8 @@ services:
       HOMESLICE_COOKIE_SECURE: "true"
       HOMESLICE_MAX_UPLOAD_MB: "500"
       HOMESLICE_SLICE_WORKERS: "1"
+      # Addresses/names you open HomeSlice by (comma-separated); they go into its HTTPS certificate.
+      HOMESLICE_TLS_HOSTS: "10.69.69.12"
     volumes:
       - homeslice-config:/config
       - homeslice-data:/data

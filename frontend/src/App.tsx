@@ -10,6 +10,7 @@ import { PrinterProvider } from "./printers";
 import { JobWatcher } from "./jobWatcher";
 import { ToastProvider } from "./toast";
 import { ConfirmProvider } from "./ui";
+import { CertBanner } from "./certBanner";
 import { Icon, IconName } from "./icons";
 
 export default function App() {
@@ -35,7 +36,19 @@ export default function App() {
     return () => window.removeEventListener("homeslice:unauthorized", onUnauthorized);
   }, [refresh]);
 
-  if (error) return <div className="center card error">Cannot reach server: {error}</div>;
+  if (error)
+    return (
+      <div className="center card stack" role="alert">
+        <h1>Can't reach HomeSlice</h1>
+        <p className="muted">
+          {navigator.onLine
+            ? "The server didn't answer. It may be restarting or updating; try again in a moment."
+            : "This device is offline. Reconnect to your home network and try again."}
+        </p>
+        <p className="muted small">Details: {error}</p>
+        <button onClick={refresh}>Try again</button>
+      </div>
+    );
   if (!status) return <div className="center muted">Loading…</div>;
   if (status.setup_required) return <SetupPage onDone={refresh} />;
   if (!status.authenticated) return <LoginPage onDone={refresh} />;
@@ -62,6 +75,7 @@ export default function App() {
         </Link>
       </header>
       <main className="content" id="main" tabIndex={-1}>
+        <CertBanner />
         <Routes>
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/login" element={<Navigate to="/library" replace />} />

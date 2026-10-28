@@ -9,3 +9,58 @@ chmod 700 /config/homeslice
 # Older images left a root-owned cache here, which breaks Firefox (Orca sign-in).
 mkdir -p /config/.cache
 lsiown -R abc:abc /config/.cache
+
+# TLS: a private CA (installable on phones/PCs) signs a server cert that names every address HomeSlice is
+# reached by. The base image's own cert has no subjectAltName, so browsers reject it even when trusted.
+SSL=/config/ssl
+CA_KEY=$SSL/homeslice-ca.key
+CA=$SSL/homeslice-ca.pem
+KEY=$SSL/homeslice.key
+CRT=$SSL/homeslice.pem
+HOSTS_FILE=$SSL/homeslice.hosts
+mkdir -p "$SSL"
+
+if [ ! -s "$CA" ] || [ ! -s "$CA_KEY" ]; then
+    openssl req -x509 -new -nodes -newkey rsa:2048 -sha256 -days 3650 \
+        -keyout "$CA_KEY" -out "$CA" \
+        -subj "/O=HomeSlice/CN=HomeSlice local CA ($(hostname))" \
+        -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
+    rm -f "$CRT"
+fi
+
+san="DNS:localhost,DNS:$(hostname),IP:127.0.0.1"
+IFS=',' read -ra extra <<< "${HOMESLICE_TLS_HOSTS:-}"
+for h in "${extra[@]}"; do
+    h="$(echo "$h" | tr -d '[:space:]')"
+    [ -z "$h" ] && continue
+    if [[ "$h" =~ ^[0-9.]+$ || "$h" == *:* ]]; then san="$san,IP:$h"; else san="$san,DNS:$h"; fi
+done
+
+# Reissue when the names change or the cert is within 30 days of expiry (Apple caps validity at 825 days).
+if [ ! -s "$CRT" ] || [ "$(cat "$HOSTS_FILE" 2>/dev/null)" != "$san" ] \
+    || ! openssl x509 -checkend 2592000 -noout -in "$CRT" >/dev/null 2>&1; then
+    csr=$SSL/homeslice.csr
+    ext=$SSL/homeslice.ext
+    printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=%s\n' "$san" > "$ext"
+    if openssl req -new -nodes -newkey rsa:2048 -keyout "$KEY.new" -out "$csr" -subj "/O=HomeSlice/CN=HomeSlice" 2>/dev/null \
+        && openssl x509 -req -in "$csr" -CA "$CA" -CAkey "$CA_KEY" -CAcreateserial -sha256 -days 825 \
+            -extfile "$ext" -out "$CRT.new" 2>/dev/null; then
+        cat "$CA" >> "$CRT.new"
+        mv "$KEY.new" "$KEY"
+        mv "$CRT.new" "$CRT"
+        echo "$san" > "$HOSTS_FILE"
+        echo "[homeslice] Issued TLS certificate for: $san"
+    else
+        echo "[homeslice] ERROR: could not issue a TLS certificate; keeping the previous one" >&2
+    fi
+    rm -f "$csr" "$ext" "$KEY.new" "$CRT.new"
+fi
+# First start with a failed issue: fall back to the base image's cert so nginx still starts.
+if [ ! -s "$CRT" ] && [ -s "$SSL/cert.pem" ]; then
+    cp "$SSL/cert.pem" "$CRT"
+    cp "$SSL/cert.key" "$KEY"
+fi
+chmod 600 "$CA_KEY" "$KEY"
+chmod 644 "$CA" "$CRT"
+lsiown abc:abc "$KEY" "$CRT" "$CA"
