@@ -32,7 +32,7 @@ async def preview(body: PreviewBody, request: Request, _: Session = Depends(requ
 async def import_files(body: ImportBody, request: Request, session: Session = Depends(require_session)) -> list[dict]:
     services = request.app.state.services
     try:
-        records = await services.importer.import_printables(body.model_id, body.file_ids)
+        records = await services.importer.import_printables(body.model_id, body.file_ids, owner=session.username)
     except TooLarge as e:
         raise HTTPException(413, str(e)) from None
     except (ModelImportError, ValidationError) as e:

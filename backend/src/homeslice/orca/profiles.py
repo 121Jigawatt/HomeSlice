@@ -29,7 +29,8 @@ class PresetRef:
     inherits: str | None
     printer_model: str | None = None
     printer_variant: str | None = None
-    compatible_printers: tuple[str, ...] = ()
+    # None = not set (inherit from parent); () = explicitly compatible with every printer.
+    compatible_printers: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,7 @@ class ProfileStore:
                     inherits or None,
                     _str_or_none(data.get("printer_model")),
                     _str_or_none(data.get("printer_variant")),
-                    tuple(c for c in compat if isinstance(c, str)) if isinstance(compat, list) else (),
+                    tuple(c for c in compat if isinstance(c, str)) if isinstance(compat, list) else None,
                 )
 
     def _load_selections(self) -> Selections | None:
@@ -157,6 +158,41 @@ class ProfileStore:
             ref = index.get((ref.kind, ref.inherits)) if ref.inherits else None
         return None
 
+    @staticmethod
+    def _compat_list(index: dict[tuple[str, str], PresetRef], ref: PresetRef | None) -> tuple[str, ...]:
+        for _ in range(MAX_INHERIT_DEPTH):
+            if ref is None:
+                return ()
+            if ref.compatible_printers is not None:
+                return ref.compatible_printers
+            ref = index.get((ref.kind, ref.inherits)) if ref.inherits else None
+        return ()
+
+    def _chain_names(self, index: dict[tuple[str, str], PresetRef], kind: str, name: str) -> list[str]:
+        names, ref = [], index.get((kind, name))
+        for _ in range(MAX_INHERIT_DEPTH):
+            if ref is None or ref.name in names:
+                break
+            names.append(ref.name)
+            ref = index.get((kind, ref.inherits)) if ref.inherits else None
+        return names
+
+    def incompatible(self, printer: str) -> dict[str, dict[str, str]]:
+        """Process/filament presets whose compatible_printers list excludes this printer, with a reason."""
+        index = self._ensure_index()
+        chain = set(self._chain_names(index, "printer", printer))
+        if not chain:
+            raise ProfileError(f"printer preset '{printer}' not found")
+        result: dict[str, dict[str, str]] = {"process": {}, "filament": {}}
+        for (kind, name), ref in index.items():
+            if kind not in result or not ref.visible:
+                continue
+            compat = self._compat_list(index, ref)
+            if compat and not chain.intersection(compat):
+                more = f" and {len(compat) - 1} other printer{'s' if len(compat) > 2 else ''}" if len(compat) > 1 else ""
+                result[kind][name] = f"Made for {compat[0]}{more}"
+        return result
+
     def _enabled_printers(self, index: dict[tuple[str, str], PresetRef], sel: Selections) -> set[str]:
         """System printer names that are enabled, or that a user printer is based on."""
         names: set[str] = set()
@@ -192,7 +228,7 @@ class ProfileStore:
                 return ref.name in printers
             if kind == "filament":
                 return ref.name in sel.filaments
-            compat = self._inherited(index, ref, "compatible_printers")
+            compat = self._compat_list(index, ref)
             return not compat or any(p in printers for p in compat)
 
         refs = [

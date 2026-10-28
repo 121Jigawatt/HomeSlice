@@ -42,6 +42,7 @@ class Library:
         *,
         source_url: str | None = None,
         license: str | None = None,
+        owner: str | None = None,
     ) -> dict:
         ext = normalize_ext(filename)
         model_id = uuid.uuid4().hex
@@ -69,11 +70,12 @@ class Library:
             "sha256": digest.hexdigest(),
             "source_url": source_url,
             "license": license,
+            "owner": owner,
             "created_at": time.time(),
         }
         self._db.execute(
-            "INSERT INTO models(id, filename, ext, size, sha256, source_url, license, created_at) "
-            "VALUES(:id, :filename, :ext, :size, :sha256, :source_url, :license, :created_at)",
+            "INSERT INTO models(id, filename, ext, size, sha256, source_url, license, owner, created_at) "
+            "VALUES(:id, :filename, :ext, :size, :sha256, :source_url, :license, :owner, :created_at)",
             record,
         )
         self.thumbnails.schedule(model_id, self._settings.library_dir / f"{model_id}{ext}", ext)

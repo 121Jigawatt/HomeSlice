@@ -26,7 +26,7 @@ async def upload_model(
     if declared and declared.isdigit() and int(declared) > services.settings.max_upload_mb * 1024**2:
         raise HTTPException(413, "File too large")
     try:
-        record = await services.library.store(filename, request.stream())
+        record = await services.library.store(filename, request.stream(), owner=session.username)
     except TooLarge as e:
         raise HTTPException(413, str(e)) from None
     except ValidationError as e:

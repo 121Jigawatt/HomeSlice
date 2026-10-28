@@ -62,7 +62,16 @@ CREATE TABLE IF NOT EXISTS printers(
 """
 
 # Columns added after a table first shipped: (table, column, type).
-ADDED_COLUMNS = [("printers", "resolved_ip", "TEXT")]
+ADDED_COLUMNS = [
+    ("printers", "resolved_ip", "TEXT"),
+    ("models", "owner", "TEXT"),
+    ("jobs", "owner", "TEXT"),
+    ("jobs", "title", "TEXT"),
+    ("jobs", "stage", "TEXT"),
+    ("jobs", "started_at", "REAL"),
+    ("jobs", "error_code", "INTEGER"),
+    ("jobs", "error_kind", "TEXT"),
+]
 
 
 class Database:

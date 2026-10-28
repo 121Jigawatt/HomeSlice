@@ -151,7 +151,7 @@ class Importer:
             "note": "MakerWorld requires a login to download. Open the model on MakerWorld to get the files.",
         }
 
-    async def import_printables(self, model_id: str, file_ids: list[str]) -> list[dict[str, Any]]:
+    async def import_printables(self, model_id: str, file_ids: list[str], owner: str | None = None) -> list[dict[str, Any]]:
         if not re.fullmatch(r"\d{1,12}", model_id):
             raise ModelImportError("Invalid model id")
         if not 1 <= len(file_ids) <= MAX_FILES_PER_IMPORT:
@@ -172,7 +172,7 @@ class Importer:
                 link = await self._printables_link(file_id, model_id)
                 records.append(
                     await self._download_into_library(
-                        link, name, f"https://www.printables.com/model/{model_id}", license_name
+                        link, name, f"https://www.printables.com/model/{model_id}", license_name, owner
                     )
                 )
             return records
@@ -190,7 +190,7 @@ class Importer:
         return link
 
     async def _download_into_library(
-        self, link: str, name: str, source_url: str, license_name: str | None
+        self, link: str, name: str, source_url: str, license_name: str | None, owner: str | None = None
     ) -> dict[str, Any]:
         tmp = self._tmp_dir / f"import-{uuid.uuid4().hex}"
         try:
@@ -201,6 +201,6 @@ class Importer:
                     while chunk := f.read(1024 * 1024):
                         yield chunk
 
-            return await self._library.store(name, chunks(), source_url=source_url, license=license_name)
+            return await self._library.store(name, chunks(), source_url=source_url, license=license_name, owner=owner)
         finally:
             tmp.unlink(missing_ok=True)

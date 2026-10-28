@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -41,6 +41,15 @@ def list_profiles(kind: str, request: Request, include_system: bool = False, _: 
         raise HTTPException(400, str(e)) from None
 
 
+@router.get("/profiles-compat")
+def profiles_compat(printer: str, request: Request, _: Session = Depends(require_session)) -> dict:
+    """Processes/filaments that don't list this printer as compatible, mapped to a reason."""
+    try:
+        return request.app.state.services.profiles.incompatible(printer)
+    except ProfileError as e:
+        raise HTTPException(404, str(e)) from None
+
+
 @router.get("/printer-bed")
 def printer_bed(name: str, request: Request, _: Session = Depends(require_session)) -> dict:
     """Build plate outline (mm) and max height of a printer preset, for the 3D preview."""
@@ -69,16 +78,55 @@ def printer_bed(name: str, request: Request, _: Session = Depends(require_sessio
 def create_job(body: JobBody, request: Request, session: Session = Depends(require_session)) -> dict:
     services = request.app.state.services
     try:
-        job_id = services.jobs.submit(JobRequest(**body.model_dump()))
+        job_id = services.jobs.submit(JobRequest(**body.model_dump()), owner=session.username)
     except (SliceArgsError, ValueError) as e:
         raise HTTPException(400, str(e)) from None
     services.auth.audit(session.username, "slice_submit", job_id, client_ip(request))
     return {"id": job_id}
 
 
+JOB_STATUSES = {"queued", "running", "done", "failed", "cancelled"}
+
+
 @router.get("/jobs")
-def list_jobs(request: Request, _: Session = Depends(require_session)) -> list[dict]:
-    return request.app.state.services.jobs.list()
+def list_jobs(
+    request: Request,
+    q: str | None = Query(default=None, max_length=200),
+    status: str | None = Query(default=None, max_length=100),
+    printer: str | None = Query(default=None, max_length=200),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=30, ge=1, le=100),
+    _: Session = Depends(require_session),
+) -> dict:
+    statuses = [s for s in (status or "").split(",") if s in JOB_STATUSES] or None
+    jobs = request.app.state.services.jobs
+    items, total = jobs.list(limit=limit, offset=offset, q=q or None, statuses=statuses, printer=printer or None)
+    return {"items": items, "total": total, "printers": jobs.printers_used()}
+
+
+class CleanupBody(BaseModel):
+    older_than_days: int = Field(ge=0, le=3650)
+    include_failed: bool = True
+
+
+@router.post("/jobs/cleanup")
+def cleanup_jobs(body: CleanupBody, request: Request, session: Session = Depends(require_session)) -> dict:
+    services = request.app.state.services
+    statuses = ("done", "failed", "cancelled") if body.include_failed else ("done",)
+    removed = services.jobs.cleanup(body.older_than_days, statuses)
+    services.auth.audit(session.username, "jobs_cleanup", f"{removed} older than {body.older_than_days}d", client_ip(request))
+    return {"removed": removed}
+
+
+@router.post("/jobs/{job_id}/retry", status_code=202)
+def retry_job(job_id: str, request: Request, session: Session = Depends(require_session)) -> dict:
+    services = request.app.state.services
+    try:
+        new_id = services.jobs.retry(_job_id(job_id), owner=session.username)
+    except (SliceArgsError, ValueError) as e:
+        raise HTTPException(400, str(e)) from None
+    services.auth.audit(session.username, "slice_retry", f"{job_id} -> {new_id}", client_ip(request))
+    return {"id": new_id}
 
 
 @router.get("/jobs/{job_id}")
