@@ -312,7 +312,7 @@ label > span.small { padding: 0; }
 .steps { margin: 0.4rem 0 0.2rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.3rem; }
 .group-role { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 10rem) auto; gap: 0.4rem; align-items: center; }
 /* .small also pads buttons; text in these lists shouldn't be. */
-:is(.user-row, .sub-card) :is(div, span, p, legend).small, p.users-intro { padding: 0; margin: 0; }
+:is(.user-row, .sub-card, .role-picker, .perm-group) :is(div, span, p, legend).small, p.users-intro { padding: 0; margin: 0; }
 .user-row .badge.small { padding: 0.2rem 0.55rem; }
 
 /* Tablet: wider column, model grid, two-column forms. Phones below 640px keep the layout above. */
