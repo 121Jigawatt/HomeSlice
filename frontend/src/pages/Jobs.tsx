@@ -1,10 +1,32 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, Job, Printer } from "../api";
 import { ModelThumb } from "../ModelThumb";
 import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinter } from "../printers";
 
 const ACTIVE = new Set(["queued", "running"]);
+const GcodeViewer = lazy(() => import("../viewer/GcodeViewer"));
+
+function GcodePreview({ job }: { job: Job }) {
+  const gcode = job.files.find((f) => f.endsWith(".gcode"));
+  const [open, setOpen] = useState(false);
+  if (!gcode) return null;
+  return (
+    <div className="card stack">
+      <div className="row between">
+        <strong>G-code preview</strong>
+        <button type="button" className="small secondary" onClick={() => setOpen(!open)} aria-expanded={open}>
+          {open ? "Hide" : "Show preview"}
+        </button>
+      </div>
+      {open && (
+        <Suspense fallback={<div className="viewer placeholder muted small">Loading viewer…</div>}>
+          <GcodeViewer jobId={job.id} file={gcode} printerPreset={job.params.printer} />
+        </Suspense>
+      )}
+    </div>
+  );
+}
 
 function StatusBadge({ status }: { status: Job["status"] }) {
   return <span className={`badge ${status}`}>{status}</span>;
@@ -139,6 +161,7 @@ export function JobPage() {
           ))}
         </div>
       )}
+      {job.status === "done" && <GcodePreview job={job} />}
       {job.status === "done" && <SendToPrinter job={job} />}
       <div className="row">
         <button className="small secondary" onClick={() => api<string>(`/api/jobs/${id}/log`).then(setLog)}>

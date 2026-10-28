@@ -140,7 +140,7 @@ async def printer_status(printer_id: str, request: Request, _: Session = Depends
     try:
         if printers.get(printer_id) is None:
             raise HTTPException(404, "Not found")
-        client = await printers.client(printer_id)
+        client = await printers.run(printer_id, printers.connected_client)
         status = await client.status()
     except PrinterError as e:
         raise HTTPException(502, str(e)) from None
@@ -167,7 +167,9 @@ async def send_job(job_id: str, body: SendBody, request: Request, session: Sessi
         if printer is None:
             raise HTTPException(404, "Unknown printer")
         remote = _remote_name(services, job, body.file)
-        result = await (await services.printers.client(body.printer_id)).upload(path, remote, start=body.start)
+        result = await services.printers.run(
+            body.printer_id, lambda client: client.upload(path, remote, start=body.start)
+        )
     except PrinterBusy as e:
         raise HTTPException(409, str(e)) from None
     except PrinterError as e:

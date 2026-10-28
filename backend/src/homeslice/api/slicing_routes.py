@@ -41,6 +41,30 @@ def list_profiles(kind: str, request: Request, include_system: bool = False, _: 
         raise HTTPException(400, str(e)) from None
 
 
+@router.get("/printer-bed")
+def printer_bed(name: str, request: Request, _: Session = Depends(require_session)) -> dict:
+    """Build plate outline (mm) and max height of a printer preset, for the 3D preview."""
+    try:
+        preset = request.app.state.services.profiles.resolve("printer", name)
+    except ProfileError as e:
+        raise HTTPException(404, str(e)) from None
+    points = []
+    for raw in preset.get("printable_area") or []:
+        try:
+            x, y = (float(v) for v in str(raw).lower().split("x", 1))
+        except ValueError:
+            continue
+        points.append([x, y])
+    if len(points) < 3:
+        points = [[0.0, 0.0], [256.0, 0.0], [256.0, 256.0], [0.0, 256.0]]
+    height = preset.get("printable_height")
+    try:
+        height = float(height[0] if isinstance(height, list) else height)
+    except (TypeError, ValueError, IndexError):
+        height = 250.0
+    return {"area": points, "height": height}
+
+
 @router.post("/jobs", status_code=202)
 def create_job(body: JobBody, request: Request, session: Session = Depends(require_session)) -> dict:
     services = request.app.state.services

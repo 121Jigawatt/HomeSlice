@@ -147,6 +147,8 @@ def create_app(settings: Settings | None = None, *, start_background: bool = Tru
     settings = settings or Settings()
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Printer polling would otherwise log every request.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         services = build_services(settings)

@@ -5,7 +5,8 @@ import ipaddress
 import socket
 import time
 import uuid
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
 import httpx
@@ -14,6 +15,7 @@ from ..crypto import SecretBox
 from ..db import Database
 from .moonraker import (
     MoonrakerClient,
+    PrinterBusy,
     PrinterError,
     check_lan_ip,
     host_label,
@@ -23,11 +25,14 @@ from .moonraker import (
 )
 
 KINDS = ("moonraker",)
+T = TypeVar("T")
 SCAN_SUBNET_KEY = "printers.scan_subnet"
 SCAN_CONCURRENCY = 64
 # Several open tabs share one round of printer queries.
 LIVE_TTL_S = 2.0
 WEBCAM_TTL_S = 60.0
+# How long a verified hostname->IP mapping is trusted before re-checking /printer/info.
+VERIFY_TTL_S = 60.0
 ACTIVE_STATES = {"printing", "paused"}
 
 
@@ -56,6 +61,7 @@ class Printers:
         self._live_lock = asyncio.Lock()
         self._estimates: dict[tuple[str, str], float | None] = {}
         self._webcams: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._verified: dict[str, float] = {}
         # Overridable in tests.
         self.transport: httpx.AsyncBaseTransport | None = None
         self.resolve = True
@@ -106,6 +112,18 @@ class Printers:
         self._live_at = 0.0
         return self._db.execute("DELETE FROM printers WHERE id=?", (parse_printer_id(printer_id),)) > 0
 
+    async def run(self, printer_id: str, fn: Callable[[MoonrakerClient], Awaitable[T]]) -> T:
+        """Calls fn with a client; if a trusted cached address fails, re-resolves and retries once."""
+        pid = parse_printer_id(printer_id)
+        try:
+            return await fn(await self.client(printer_id))
+        except PrinterBusy:
+            raise
+        except PrinterError:
+            if self._verified.pop(pid, None) is None:
+                raise
+            return await fn(await self.client(printer_id))
+
     async def live(self) -> list[dict[str, Any]]:
         async with self._live_lock:
             if time.monotonic() - self._live_at < LIVE_TTL_S:
@@ -118,8 +136,10 @@ class Printers:
     async def _live_one(self, printer: dict[str, Any]) -> dict[str, Any]:
         base = {"id": printer["id"], "name": printer["name"]}
         try:
-            client = await self.client(printer["id"])
-            t = await client.telemetry()
+            async def fetch(c: MoonrakerClient) -> tuple[MoonrakerClient, dict[str, Any]]:
+                return c, await c.telemetry()
+
+            client, t = await self.run(printer["id"], fetch)
             remaining = None
             if t["state"] in ACTIVE_STATES and t["filename"]:
                 key = (printer["id"], t["filename"])
@@ -140,7 +160,13 @@ class Printers:
                 "webcams": [c["name"] for c in await self._webcam_list(printer["id"], client)],
             }
         except PrinterError as e:
+            self._verified.pop(printer["id"], None)
             return {**base, "connected": False, "error": str(e), "state": "offline", "webcams": []}
+
+    @staticmethod
+    async def connected_client(client: MoonrakerClient) -> MoonrakerClient:
+        await client.telemetry()
+        return client
 
     async def _webcam_list(self, pid: str, client: MoonrakerClient) -> list[dict[str, Any]]:
         cached = self._webcams.get(pid)
@@ -151,7 +177,7 @@ class Printers:
         return cams
 
     async def webcam_source(self, printer_id: str, index: int, snapshot: bool) -> tuple[MoonrakerClient, str]:
-        client = await self.client(printer_id)
+        client = await self.run(printer_id, self.connected_client)
         cams = await self._webcam_list(parse_printer_id(printer_id), client)
         if not 0 <= index < len(cams):
             raise PrinterError("Unknown webcam")
@@ -192,6 +218,8 @@ class Printers:
         async with self._locks.setdefault(pid, asyncio.Lock()):
             row = self._db.one("SELECT resolved_ip FROM printers WHERE id=?", (pid,))
             cached = row["resolved_ip"] if row else None
+            if cached and time.monotonic() - self._verified.get(pid, 0.0) < VERIFY_TTL_S:
+                return base_for(cached)
             async with httpx.AsyncClient(
                 transport=self.transport,
                 follow_redirects=False,
@@ -199,6 +227,7 @@ class Printers:
                 limits=httpx.Limits(max_connections=SCAN_CONCURRENCY),
             ) as http:
                 if cached and host_label(await probe_hostname(http, base_for(cached)) or "") == want:
+                    self._verified[pid] = time.monotonic()
                     return base_for(cached)
                 found = await self._from_dns(host, parts.port) or await self._scan(http, want, base_for)
             if found is None:
@@ -209,6 +238,7 @@ class Printers:
                     )
                 raise PrinterError(f"No Klipper printer named '{want}' answered in {subnet}")
             self._db.execute("UPDATE printers SET resolved_ip=? WHERE id=?", (found, pid))
+            self._verified[pid] = time.monotonic()
             return base_for(found)
 
     async def _from_dns(self, host: str, port: int | None) -> str | None:

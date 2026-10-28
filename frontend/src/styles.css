@@ -105,6 +105,11 @@ progress { width: 100%; }
 .confirm-box { border: 1px solid var(--accent); border-radius: 10px; padding: 0.75rem; background: rgba(20, 184, 166, 0.08); }
 .confirm-box p { margin: 0; }
 
+.viewer { position: relative; width: 100%; height: min(60vh, 340px); border-radius: 10px; background: radial-gradient(circle at 50% 40%, #16213a, var(--bg)); overflow: hidden; touch-action: none; }
+.viewer canvas { display: block; width: 100%; height: 100%; }
+.viewer.placeholder { display: flex; align-items: center; justify-content: center; }
+input[type="range"] { padding: 0; accent-color: var(--accent); }
+
 .preview-main { width: 100%; max-height: 50vh; object-fit: contain; border-radius: 8px; background: var(--bg); }
 .thumbs { flex-wrap: nowrap; overflow-x: auto; }
 .thumb { padding: 0; background: none; border: 2px solid transparent; border-radius: 6px; flex: 0 0 auto; }

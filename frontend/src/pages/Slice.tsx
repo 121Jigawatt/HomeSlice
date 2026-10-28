@@ -1,10 +1,12 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, Model, Preset } from "../api";
 import { ModelThumb } from "../ModelThumb";
 import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinters } from "../printers";
 
 type Kind = "printer" | "process" | "filament";
+
+const ModelViewer = lazy(() => import("../viewer/ModelViewer"));
 
 // Orca's curr_bed_type values and the labels Orca shows for them.
 const BED_TYPES: [string, string][] = [
@@ -55,6 +57,7 @@ export default function SlicePage() {
     () => !includeSystem && presets.printer.length === 0,
     [includeSystem, presets.printer.length],
   );
+  const selectedModels = useMemo(() => models.filter((m) => selected.has(m.id)), [models, selected]);
 
   function toggle(id: string) {
     const next = new Set(selected);
@@ -111,6 +114,11 @@ export default function SlicePage() {
             {m.filename}
           </label>
         ))}
+        {selected.size > 0 && (
+          <Suspense fallback={<div className="viewer placeholder muted small">Loading 3D preview…</div>}>
+            <ModelViewer models={selectedModels} printerPreset={printer} />
+          </Suspense>
+        )}
       </fieldset>
 
       {machines && machines.length > 0 && (

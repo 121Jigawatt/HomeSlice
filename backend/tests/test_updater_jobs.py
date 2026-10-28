@@ -183,3 +183,15 @@ async def test_first_run_retries_after_failed_check(checker, monkeypatch):
     monkeypatch.setattr(services.updater, "latest", failing)
     assert await app_module.check_for_updates(services) == app_module.FIRST_INSTALL_RETRY_S
     assert installs == []
+
+
+def test_printer_bed_from_preset(authed, settings):
+    d = settings.orca_datadir / "user/default/machine"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SV08.json").write_text(
+        json.dumps({"name": "SV08", "printable_area": ["0x0", "350x0", "350x350", "0x350"], "printable_height": "345"})
+    )
+    r = authed.get("/api/printer-bed", params={"name": "SV08"})
+    assert r.status_code == 200
+    assert r.json() == {"area": [[0, 0], [350, 0], [350, 350], [0, 350]], "height": 345.0}
+    assert authed.get("/api/printer-bed", params={"name": "nope"}).status_code == 404
