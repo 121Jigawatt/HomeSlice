@@ -3,11 +3,13 @@ import os
 import threading
 import time
 import uuid
+import zipfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 from ..config import Settings
 from ..db import Database
+from . import threemf
 from .step import STEP_EXTS
 from .step import convert as step_convert
 from .thumbnails import Thumbnails
@@ -33,6 +35,7 @@ class Library:
         self.thumbnails = Thumbnails(settings.thumbs_dir)
         self._convert_locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
+        self._plates: dict[str, list[dict]] = {}
 
     def path_for(self, model_id: str) -> Path | None:
         row = self._db.one("SELECT id, ext FROM models WHERE id=?", (parse_model_id(model_id),))
@@ -114,7 +117,39 @@ class Library:
         return {**record, "has_thumbnail": False}
 
     def _public(self, row) -> dict:
-        return {**dict(row), "has_thumbnail": self.thumbnails.exists(row["id"])}
+        record = {**dict(row), "has_thumbnail": self.thumbnails.exists(row["id"])}
+        if row["ext"] == ".3mf":
+            record["plates"] = self.plates(row["id"])
+        return record
+
+    def plates(self, model_id: str) -> list[dict]:
+        """Saved plates of a 3MF project (cached); [] for other files or 3MFs without plates."""
+        mid = parse_model_id(model_id)
+        if mid not in self._plates:
+            path = self.path_for(mid)
+            try:
+                found = threemf.plates(path) if path and path.suffix == ".3mf" else []
+            except (OSError, zipfile.BadZipFile):
+                found = []
+            self._plates[mid] = [{"index": p["index"], "name": p["name"], "objects": len(p["object_ids"])} for p in found]
+        return self._plates[mid]
+
+    def preview_mesh(self, model_id: str, plate: int = 0) -> Path | None:
+        """An STL of the model for the browser; 3MF projects are flattened (optionally one plate). Blocking."""
+        path = self.path_for(model_id)
+        if path is None or path.suffix != ".3mf":
+            return self.mesh_path(model_id)
+        mid = parse_model_id(model_id)
+        dest = self._settings.library_dir / f"{mid}.plate{plate}.stl"
+        with self._convert_lock(mid):
+            if not dest.is_file():
+                tmp = dest.with_name(f"{dest.stem}.{uuid.uuid4().hex}.tmp")
+                try:
+                    threemf.write_combined(path, tmp, plate)
+                    os.replace(tmp, dest)
+                finally:
+                    tmp.unlink(missing_ok=True)
+        return dest
 
     def list(self) -> list[dict]:
         return [self._public(r) for r in self._db.all("SELECT * FROM models ORDER BY created_at DESC")]
@@ -135,6 +170,10 @@ class Library:
             return False
         self._db.execute("DELETE FROM models WHERE id=?", (parse_model_id(model_id),))
         path.unlink(missing_ok=True)
-        self._converted(parse_model_id(model_id)).unlink(missing_ok=True)
-        self.thumbnails.delete(parse_model_id(model_id))
+        mid = parse_model_id(model_id)
+        self._converted(mid).unlink(missing_ok=True)
+        for cached in self._settings.library_dir.glob(f"{mid}.plate*.stl"):
+            cached.unlink(missing_ok=True)
+        self._plates.pop(mid, None)
+        self.thumbnails.delete(mid)
         return True

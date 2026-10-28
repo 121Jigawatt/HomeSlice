@@ -37,6 +37,8 @@ export function ModelPicker({
   onToggle,
   copies,
   onCopies,
+  plates,
+  onPlate,
 }: {
   models: Model[];
   loaded: boolean;
@@ -44,6 +46,8 @@ export function ModelPicker({
   onToggle: (id: string) => void;
   copies: Record<string, number>;
   onCopies: (id: string, n: number) => void;
+  plates: Record<string, number>;
+  onPlate: (id: string, plate: number) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
@@ -72,7 +76,23 @@ export function ModelPicker({
           {chosen.map((m) => (
             <li key={m.id} className="row picked-model">
               <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={40} />
-              <span className="grow title">{m.filename}</span>
+              <div className="grow stack picked-info">
+                <span className="title">{m.filename}</span>
+                {m.plates && m.plates.length > 1 && (
+                  <label className="plate-select">
+                    <span className="sr-only">Plate of {m.filename}</span>
+                    <select value={plates[m.id] ?? m.plates[0].index} onChange={(e) => onPlate(m.id, Number(e.target.value))}>
+                      {m.plates.map((p) => (
+                        <option key={p.index} value={p.index}>
+                          Plate {p.index}
+                          {p.name ? `: ${p.name}` : ""} ({p.objects} object{p.objects === 1 ? "" : "s"})
+                        </option>
+                      ))}
+                      <option value={0}>All plates together</option>
+                    </select>
+                  </label>
+                )}
+              </div>
               <Quantity name={m.filename} value={copies[m.id] ?? 1} onChange={(n) => onCopies(m.id, n)} />
               <button
                 type="button"

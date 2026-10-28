@@ -86,6 +86,8 @@ export interface Model {
   source_url: string | null;
   license: string | null;
   has_thumbnail: boolean;
+  // Saved plates of a 3MF project (Bambu Studio / OrcaSlicer).
+  plates?: { index: number; name: string; objects: number }[];
 }
 
 export interface Preset {
@@ -115,6 +117,7 @@ export interface Job {
   params: {
     model_ids: string[];
     copies?: number[];
+    model_plates?: number[];
     printer: string;
     process: string;
     filaments: string[];

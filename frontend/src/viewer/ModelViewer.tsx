@@ -15,17 +15,22 @@ interface Bed {
   height: number;
 }
 
-async function loadModel(m: Model): Promise<THREE.Object3D> {
-  // STEP is CAD, not a mesh: the server converts it to STL.
+type PreviewModel = Model & { plate?: number };
+
+async function loadModel(m: PreviewModel): Promise<THREE.Object3D> {
+  // STEP (CAD) and 3MF projects come from the server as STL: STEP converted, 3MF flattened per plate. three.js'
+  // 3MF loader can't follow Bambu Studio's multi-file objects.
   const isStep = m.ext === ".step" || m.ext === ".stp";
-  const res = await fetch(`/api/library/${m.id}/${isStep ? "mesh" : "file"}`, { credentials: "same-origin" });
+  const viaServer = isStep || m.ext === ".3mf";
+  const url = viaServer ? `/api/library/${m.id}/mesh?plate=${m.plate ?? 0}` : `/api/library/${m.id}/file`;
+  const res = await fetch(url, { credentials: "same-origin" });
   if (!res.ok) {
     const detail = await res.json().then((j) => j.detail as string).catch(() => "");
     throw new Error(detail || `Could not load ${m.filename}`);
   }
   const data = await res.arrayBuffer();
   const material = new THREE.MeshStandardMaterial({ color: ACCENT, roughness: 0.6, metalness: 0.05 });
-  if (m.ext === ".stl" || isStep) {
+  if (m.ext === ".stl" || viaServer) {
     const geo = new STLLoader().parse(data);
     geo.computeVertexNormals();
     return new THREE.Mesh(geo, material);
@@ -82,7 +87,7 @@ function layout(objects: THREE.Object3D[], bed: Bed): THREE.Box3 {
   return all;
 }
 
-export default function ModelViewer({ models, printerPreset }: { models: Model[]; printerPreset: string }) {
+export default function ModelViewer({ models, printerPreset }: { models: PreviewModel[]; printerPreset: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const [bed, setBed] = useState<Bed | null>(null);
@@ -132,9 +137,10 @@ export default function ModelViewer({ models, printerPreset }: { models: Model[]
       setStatus("Loading preview…");
       // Copies share one download and geometry.
       const loads = new Map<string, Promise<THREE.Object3D>>();
-      const load = (m: Model) => {
-        if (!loads.has(m.id)) loads.set(m.id, loadModel(m));
-        return loads.get(m.id)!.then((o) => o.clone());
+      const load = (m: PreviewModel) => {
+        const key = `${m.id}:${m.plate ?? 0}`;
+        if (!loads.has(key)) loads.set(key, loadModel(m));
+        return loads.get(key)!.then((o) => o.clone());
       };
       Promise.allSettled(previewable.map(load)).then((results) => {
         if (cancelled) return;

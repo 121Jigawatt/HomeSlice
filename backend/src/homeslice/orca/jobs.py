@@ -7,14 +7,17 @@ import re
 import shutil
 import time
 import uuid
+import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ..config import Settings
 from ..db import Database
+from ..library import threemf
 from ..library.service import Library
 from ..library.step import StepError
+from ..library.thumbnails import ThumbnailError
 from .cli import BED_TEMP_KEYS, SliceArgsError, SliceSpec, build_args, run_orca, validate_overrides
 from .errors import explain, signed_code
 from .gcode_thumbs import embed as embed_thumbnails
@@ -45,9 +48,14 @@ class JobRequest:
     plate: int = 0
     # Copies of each model, parallel to model_ids; empty means one of each.
     copies: list[int] = field(default_factory=list)
+    # 3MF plate per model (0 = every plate), parallel to model_ids; empty means all.
+    model_plates: list[int] = field(default_factory=list)
 
     def counts(self) -> list[int]:
         return self.copies or [1] * len(self.model_ids)
+
+    def plates_for(self) -> list[int]:
+        return self.model_plates or [0] * len(self.model_ids)
 
 
 MAX_COPIES = 100
@@ -148,13 +156,21 @@ class JobManager:
             raise SliceArgsError(f"Copies must be between 1 and {MAX_COPIES}")
         if sum(counts) > MAX_OBJECTS:
             raise SliceArgsError(f"At most {MAX_OBJECTS} objects can be sliced at once")
+        if req.model_plates and len(req.model_plates) != len(req.model_ids):
+            raise SliceArgsError("Give one plate per model")
         validate_overrides(req.overrides)
         names = []
-        for mid in req.model_ids:
+        for mid, plate in zip(req.model_ids, req.plates_for()):
             record = self._library.get(mid)
             if record is None:
                 raise SliceArgsError("Unknown model")
-            names.append(record["filename"])
+            name = record["filename"]
+            if plate:
+                match = next((p for p in record.get("plates") or [] if p["index"] == plate), None)
+                if match is None:
+                    raise SliceArgsError(f"{name} has no plate {plate}")
+                name = f"{name} ({match['name'] or f'plate {plate}'})"
+            names.append(name)
         if bed_type := req.overrides.get("curr_bed_type"):
             self._check_bed_temps(bed_type, req.filaments)
         job_id = uuid.uuid4().hex
@@ -355,9 +371,18 @@ class JobManager:
                 for i, name in enumerate(req.filaments)
             ]
             size_for_filaments(process, filaments)
-            # STEP models are sliced from their converted mesh (Orca's CLI only reads STL/OBJ/AMF/3MF).
-            meshes = {mid: await asyncio.to_thread(self._library.mesh_path, mid) for mid in dict.fromkeys(req.model_ids)}
-            inputs = [meshes[mid] for mid, n in zip(req.model_ids, req.counts()) for _ in range(n)]
+            # Orca's CLI only reads STL/OBJ/AMF/3MF: STEP is sliced from its converted mesh, and 3MF projects
+            # from their objects (embedded project settings can be invalid for Orca or crash its CLI).
+            inputs: list[Path | None] = []
+            split_3mf = False
+            for i, (mid, n, plate) in enumerate(zip(req.model_ids, req.counts(), req.plates_for())):
+                source = self._library.path_for(mid)
+                if source is not None and source.suffix == ".3mf":
+                    parts = await asyncio.to_thread(threemf.write_items, source, jdir / "inputs" / str(i), plate)
+                    split_3mf = True
+                else:
+                    parts = [await asyncio.to_thread(self._library.mesh_path, mid)]
+                inputs += parts * n
             if any(p is None for p in inputs):
                 raise SliceArgsError("A selected model no longer exists")
             spec = SliceSpec(
@@ -366,12 +391,13 @@ class JobManager:
                 process_json=process.resolve(),
                 filament_jsons=[f.resolve() for f in filaments],
                 overrides=req.overrides,
-                arrange=req.arrange,
+                # Separate object files have no shared layout, so they must be arranged.
+                arrange=req.arrange or split_3mf,
                 orient=req.orient,
                 plate=req.plate,
             )
             args = build_args(binary, spec, outdir.resolve(), datadir.resolve(), (jdir / "orca.log").resolve())
-        except (ProfileError, SliceArgsError, StepError, OSError, ValueError) as e:
+        except (ProfileError, SliceArgsError, StepError, ThumbnailError, zipfile.BadZipFile, OSError, ValueError) as e:
             self._finish(job_id, "failed", str(e), error_kind="setup")
             return
 

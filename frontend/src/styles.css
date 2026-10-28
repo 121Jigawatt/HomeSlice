@@ -201,6 +201,8 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .printer-profiles { margin-top: 0.5rem; }
 .warn-inline { color: #fde68a; }
 .picked-model { flex-wrap: nowrap; }
+.picked-info { gap: 0.3rem; min-width: 0; }
+.plate-select select { padding: 0.4rem 0.5rem; font-size: 0.9rem; }
 .quantity { display: inline-flex; align-items: center; gap: 0.25rem; flex: 0 0 auto; }
 .quantity input { width: 3.6rem; text-align: center; padding: 0.55rem 0.25rem; -moz-appearance: textfield; }
 .quantity input::-webkit-inner-spin-button, .quantity input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }

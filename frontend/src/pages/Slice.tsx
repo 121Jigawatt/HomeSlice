@@ -73,6 +73,9 @@ export default function SlicePage() {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(params.getAll("model")));
   const [copies, setCopies] = useState<Record<string, number>>({});
   const countOf = (id: string) => copies[id] ?? 1;
+  const [plates, setPlates] = useState<Record<string, number>>({});
+  // Multi-plate 3MF projects default to their first plate rather than everything at once.
+  const plateOf = (m: Model) => plates[m.id] ?? (m.plates && m.plates.length > 1 ? m.plates[0].index : 0);
   const [includeSystem, setIncludeSystem] = useState(false);
   const [presets, setPresets] = useState<Record<Kind, Preset[]>>({ printer: [], process: [], filament: [] });
   const [presetsLoaded, setPresetsLoaded] = useState(false);
@@ -149,6 +152,7 @@ export default function SlicePage() {
           apply(fromJob(job));
           setSelected(new Set(job.params.model_ids));
           setCopies(Object.fromEntries(job.params.model_ids.map((id, i) => [id, job.params.copies?.[i] ?? 1])));
+          setPlates(Object.fromEntries(job.params.model_ids.map((id, i) => [id, job.params.model_plates?.[i] ?? 0])));
           setPrefillNote(`Settings copied from the job for ${job.title ?? "a previous slice"}.`);
           setPrefilled(true);
         })
@@ -230,10 +234,16 @@ export default function SlicePage() {
   );
   const selectedModels = useMemo(() => models.filter((m) => selected.has(m.id)), [models, selected]);
   const previewModels = useMemo(
-    () => selectedModels.flatMap((m) => Array.from({ length: copies[m.id] ?? 1 }, () => m)),
-    [selectedModels, copies],
+    () =>
+      selectedModels.flatMap((m) => Array.from({ length: copies[m.id] ?? 1 }, () => ({ ...m, plate: plateOf(m) }))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedModels, copies, plates],
   );
-  const totalObjects = selectedModels.reduce((n, m) => n + countOf(m.id), 0);
+  const objectsIn = (m: Model) => {
+    const p = plateOf(m);
+    return p ? (m.plates?.find((x) => x.index === p)?.objects ?? 1) : (m.plates?.reduce((n, x) => n + x.objects, 0) || 1);
+  };
+  const totalObjects = selectedModels.reduce((n, m) => n + countOf(m.id) * objectsIn(m), 0);
   const chosenFilaments = filaments.filter(Boolean);
 
   const blockers: string[] = [];
@@ -284,6 +294,10 @@ export default function SlicePage() {
         json: {
           model_ids: [...selected],
           copies: [...selected].map(countOf),
+          model_plates: [...selected].map((id) => {
+            const m = models.find((x) => x.id === id);
+            return m ? plateOf(m) : 0;
+          }),
           printer,
           process,
           filaments: chosenFilaments,
@@ -335,6 +349,8 @@ export default function SlicePage() {
           onToggle={toggle}
           copies={copies}
           onCopies={(id, n) => setCopies((c) => ({ ...c, [id]: n }))}
+          plates={plates}
+          onPlate={(id, p) => setPlates((c) => ({ ...c, [id]: p }))}
         />
         {selected.size > 0 && (
           <Suspense fallback={<div className="viewer placeholder muted small">Loading 3D preview…</div>}>
