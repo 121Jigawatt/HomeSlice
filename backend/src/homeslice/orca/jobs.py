@@ -59,6 +59,40 @@ def parse_gcode_stats(path: Path) -> dict[str, str]:
     return stats
 
 
+DEFAULT_FLUSH_MM3 = 280.0
+DEFAULT_FILAMENT_COLOUR = "#F2754E"
+
+
+def size_for_filaments(process_json: Path, filament_jsons: list[Path]) -> None:
+    """Gives each slice one colour per filament and an N×N purge matrix.
+
+    The GUI resizes these when filaments are added; the CLI keeps Orca's 4×4 default and a single colour,
+    which breaks MMU firmware (e.g. Happy Hare) that reads them from the G-code.
+    """
+    n = len(filament_jsons)
+    for path in filament_jsons:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        colour = data.get("filament_colour")
+        colour = colour[0] if isinstance(colour, list) and colour else colour
+        data["filament_colour"] = [colour if isinstance(colour, str) and colour else DEFAULT_FILAMENT_COLOUR]
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    process = json.loads(process_json.read_text(encoding="utf-8"))
+    flush = DEFAULT_FLUSH_MM3
+    existing = process.get("flush_volumes_matrix")
+    if isinstance(existing, list):
+        for v in existing:
+            try:
+                if float(v) > 0:
+                    flush = float(v)
+                    break
+            except (TypeError, ValueError):
+                continue
+    process["flush_volumes_matrix"] = [f"{0 if r == c else flush:g}" for r in range(n) for c in range(n)]
+    process["flush_volumes_vector"] = ["140"] * (2 * n)
+    process_json.write_text(json.dumps(process, indent=2), encoding="utf-8")
+
+
 class JobManager:
     def __init__(
         self,
@@ -302,6 +336,7 @@ class JobManager:
                 self._profiles.write_resolved("filament", name, profiles_dir / f"filament_{i}.json")
                 for i, name in enumerate(req.filaments)
             ]
+            size_for_filaments(process, filaments)
             inputs = [self._library.path_for(mid) for mid in req.model_ids]
             if any(p is None for p in inputs):
                 raise SliceArgsError("A selected model no longer exists")
