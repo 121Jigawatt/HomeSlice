@@ -474,7 +474,7 @@ function SendToPrinter({ job }: { job: Job }) {
   const [printers, setPrinters] = useState<Printer[] | null>(null);
   const [printerId, setPrinterId] = useState(() => localStorage.getItem("send.printer") ?? "");
   const [file, setFile] = useState(gcodes[0] ?? "");
-  const [start, setStart] = useState(false);
+  const [start, setStart] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
