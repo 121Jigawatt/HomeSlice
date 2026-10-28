@@ -128,7 +128,7 @@ def test_state_must_come_back_to_the_same_browser(authed, idp):
         ({"iss": "https://evil.test/"}, "couldn't be verified"),
         ({"exp": int(time.time()) - 600}, "couldn't be verified"),
         ({"nonce": "replayed"}, "couldn't be verified"),
-        ({"preferred_username": "no spaces allowed"}, "can't be used here"),
+        ({"preferred_username": "ab"}, "no usable username"),
     ],
 )
 def test_bad_tokens_are_rejected(authed, idp, claims, message):
@@ -194,6 +194,14 @@ def test_provider_errors_and_settings_validation(authed, idp):
 def test_open_redirects_are_blocked(authed, idp):
     _, r = sign_in(authed, idp, next_path="//evil.test/x")
     assert r.headers["location"] == "/"
+
+
+@pytest.mark.parametrize("name, expected", [("mmdragonoid@gmail.com", "mmdragonoid@gmail.com"), ("Ann Lee", "Ann_Lee")])
+def test_email_and_unusual_usernames(authed, idp, name, expected):
+    idp.claims = {"preferred_username": name}
+    c, r = sign_in(authed, idp)
+    assert r.headers["location"] == "/jobs", error_of(r)
+    assert c.get("/api/auth/status").json()["username"] == expected
 
 
 def test_provider_token_errors_are_explained(authed, idp):

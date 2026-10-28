@@ -12,7 +12,7 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from .config import Settings
 from .crypto import write_private_file
 from .db import Database
-from .rbac import ADMIN_ROLE, USERNAME_RE, Rbac, ensure_builtin_roles, permissions_for
+from .rbac import ADMIN_ROLE, USERNAME_RE, USERNAME_RULE, Rbac, ensure_builtin_roles, permissions_for
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class AuthService:
         if not hmac.compare_digest(expected.encode(), setup_token.strip().encode()):
             raise AuthError("Invalid setup token")
         if not USERNAME_RE.fullmatch(username):
-            raise AuthError("Username must be 3-32 characters: letters, digits, . _ -")
+            raise AuthError(USERNAME_RULE)
         self.validate_password(password)
         pw_hash = self._ph.hash(password)
         with self._db.tx() as conn:

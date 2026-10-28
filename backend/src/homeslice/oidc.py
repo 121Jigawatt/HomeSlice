@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import secrets
 import sqlite3
 import time
@@ -299,14 +300,15 @@ class Oidc:
         """The HomeSlice user for these claims: linked by subject, else matched or created by username."""
         cfg = self.config()
         sub = str(claims["sub"])
-        username = str(claims.get(cfg.username_claim) or "").strip()
+        username = re.sub(r"[^A-Za-z0-9_.@+-]+", "_", str(claims.get(cfg.username_claim) or "").strip())[:64]
         groups = claims.get("groups") or []
         groups = {str(g) for g in groups} if isinstance(groups, list) else set()
         row = self._db.one("SELECT id, username, disabled FROM users WHERE oidc_sub=?", (sub,))
         if row is None:
             if not USERNAME_RE.fullmatch(username):
                 raise OidcError(
-                    f'Your {cfg.label} username "{username[:40]}" can\'t be used here: 3-32 letters, digits, . _ - only.'
+                    f'Your {cfg.label} account has no usable username ("{username[:40]}"). Check the provider sends '
+                    f'"{cfg.username_claim}", or change the username claim under Settings → Single sign-on.'
                 )
             existing = self._db.one("SELECT id, username, disabled, oidc_sub FROM users WHERE username=?", (username,))
             if existing is not None:

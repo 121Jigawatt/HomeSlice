@@ -291,7 +291,7 @@ function AddUser({ roles, onDone }: { roles: Role[]; onDone: (added: boolean) =>
       <strong>New user</strong>
       <label>
         Username
-        <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" pattern="[A-Za-z0-9_.\-]{3,32}" title="3-32 letters, digits, . _ -" required />
+        <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" pattern="[A-Za-z0-9_.@+\-]{3,64}" title="3-64 letters, digits, . _ - @ +" required />
       </label>
       <PasswordField label="Temporary password (12+ characters)" value={password} onChange={setPassword} />
       <RolePicker label="Roles" roles={roles} value={roleIds} onChange={setRoleIds} />

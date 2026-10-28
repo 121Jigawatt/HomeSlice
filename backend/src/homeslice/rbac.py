@@ -57,7 +57,9 @@ BUILTIN_ROLES: list[tuple[str, str, list[str]]] = [
 ]
 
 ROLE_NAME_RE = re.compile(r"^[\w .-]{1,40}$")
-USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
+# Email addresses are allowed, since identity providers often use them as usernames.
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_.@+-]{3,64}$")
+USERNAME_RULE = "Username must be 3-64 characters: letters, digits, . _ - @ +"
 
 
 class RbacError(Exception):
@@ -228,7 +230,7 @@ class Rbac:
     def create_user(self, username: str, password: str, role_ids: list[int], must_change_password: bool) -> dict:
         username = username.strip()
         if not USERNAME_RE.fullmatch(username):
-            raise RbacError("Username must be 3-32 characters: letters, digits, . _ -")
+            raise RbacError(USERNAME_RULE)
         self._validate_password(password)
         pw_hash = self._ph.hash(password)
         try:
