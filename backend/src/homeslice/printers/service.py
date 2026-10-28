@@ -274,7 +274,8 @@ class Printers:
         async with self._locks.setdefault(pid, asyncio.Lock()):
             row = self._db.one("SELECT resolved_ip FROM printers WHERE id=?", (pid,))
             cached = row["resolved_ip"] if row else None
-            if cached and time.monotonic() - self._verified.get(pid, 0.0) < VERIFY_TTL_S:
+            verified_at = self._verified.get(pid)
+            if cached and verified_at is not None and time.monotonic() - verified_at < VERIFY_TTL_S:
                 return base_for(cached)
             async with httpx.AsyncClient(
                 transport=self.transport,
