@@ -1,7 +1,7 @@
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, Job, Model, Preset } from "../api";
-import { ModelThumb } from "../ModelThumb";
+import { ModelPicker } from "../ModelPicker";
 import { displayName } from "../presetNames";
 import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinters } from "../printers";
 import { useToast } from "../toast";
@@ -56,6 +56,7 @@ export default function SlicePage() {
   const navigate = useNavigate();
   const notify = useToast();
   const [models, setModels] = useState<Model[]>([]);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(params.getAll("model")));
   const [includeSystem, setIncludeSystem] = useState(false);
   const [presets, setPresets] = useState<Record<Kind, Preset[]>>({ printer: [], process: [], filament: [] });
@@ -117,7 +118,10 @@ export default function SlicePage() {
   }, [params]);
 
   useEffect(() => {
-    api<Model[]>("/api/library").then(setModels).catch((e) => setError(e.message));
+    api<Model[]>("/api/library")
+      .then(setModels)
+      .catch((e) => setError(e.message))
+      .finally(() => setModelsLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -226,14 +230,7 @@ export default function SlicePage() {
 
       <fieldset className="card stack slice-models">
         <legend>Models</legend>
-        {models.length === 0 && <p className="muted">Upload a model in the Library first.</p>}
-        {models.map((m) => (
-          <label key={m.id} className="row check">
-            <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} />
-            <ModelThumb id={m.id} hasThumbnail={m.has_thumbnail} size={40} />
-            {m.filename}
-          </label>
-        ))}
+        <ModelPicker models={models} loaded={modelsLoaded} selected={selected} onToggle={toggle} />
         {selected.size > 0 && (
           <Suspense fallback={<div className="viewer placeholder muted small">Loading 3D preview…</div>}>
             <ModelViewer models={selectedModels} printerPreset={printer} />
