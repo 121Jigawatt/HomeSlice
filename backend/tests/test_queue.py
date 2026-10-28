@@ -59,6 +59,20 @@ def test_manual_flag_with_reason(printer_setup):
     assert live(authed)["attention_reason"] == "Nozzle clog"
 
 
+def test_new_print_at_printer_clears_automatic_flag_only(printer_setup):
+    authed, fake, printer = printer_setup
+    fake.state = "complete"
+    assert live(authed)["needs_attention"] is True
+    fake.state = "printing"  # Started at the printer, so the bed was cleared.
+    assert live(authed)["needs_attention"] is False
+
+    authed.put(f"/api/printers/{printer['id']}/attention", json={"needs_attention": True, "reason": "Nozzle clog"})
+    fake.state = "complete"
+    live(authed)
+    fake.state = "printing"
+    assert live(authed)["attention_reason"] == "Nozzle clog"
+
+
 def test_queue_dispatches_one_print_then_waits_for_clear_bed(printer_setup):
     authed, fake, printer = printer_setup
     first = queue(authed, make_done_job(authed), printer)

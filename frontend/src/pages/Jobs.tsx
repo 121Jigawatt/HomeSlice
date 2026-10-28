@@ -4,7 +4,7 @@ import { api, Job, JobPage as JobPageData, Printer } from "../api";
 import { Icon, IconName } from "../icons";
 import { ModelThumb } from "../ModelThumb";
 import { displayName } from "../presetNames";
-import { BedFlag, formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinter } from "../printers";
+import { BedFlag, formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinter, Webcam } from "../printers";
 import { PrintQueuePanel } from "../queue";
 import { useToast } from "../toast";
 import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
@@ -372,8 +372,21 @@ export function JobPage() {
           <div title={job.params.process}>Process: {displayName(job.params.process)}</div>
           <div>Filaments: {job.params.filaments.map(displayName).join(", ")}</div>
           {job.owner && <div className="muted">Sliced by {job.owner}</div>}
+          {job.stats && (
+            <div className="muted">
+              {[
+                job.stats.print_time && `Print time ${job.stats.print_time}`,
+                job.stats.filament_g && `${job.stats.filament_g} g`,
+                job.stats.filament_mm && `${job.stats.filament_mm} mm`,
+                job.stats.layers && `${job.stats.layers} layers`,
+              ]
+                .filter(Boolean)
+                .join(" \u00b7 ")}
+            </div>
+          )}
         </div>
       </div>
+      {job.status === "done" && <SendToPrinter job={job} />}
       {ACTIVE.has(job.status) && (
         <div className="card stack" aria-live="polite">
           <div className="row between">
@@ -425,26 +438,7 @@ export function JobPage() {
           </button>
         </div>
       )}
-      {job.stats && (
-        <div className="card stack small">
-          {job.stats.print_time && <div>Print time: {job.stats.print_time}</div>}
-          {job.stats.filament_g && <div>Filament: {job.stats.filament_g} g</div>}
-          {job.stats.filament_mm && <div>Filament length: {job.stats.filament_mm} mm</div>}
-          {job.stats.layers && <div>Layers: {job.stats.layers}</div>}
-        </div>
-      )}
-      {job.files.length > 0 && (
-        <div className="card stack">
-          <strong>Output</strong>
-          {job.files.map((f) => (
-            <a key={f} className="button secondary" href={`/api/jobs/${job.id}/files/${encodeURIComponent(f)}`} download>
-              <Icon name="download" size={16} /> Download {f}
-            </a>
-          ))}
-        </div>
-      )}
       {job.status === "done" && <GcodePreview job={job} />}
-      {job.status === "done" && <SendToPrinter job={job} />}
       {job.status !== "failed" && !ACTIVE.has(job.status) && (
         <details className="card">
           <summary>Technical details</summary>
@@ -464,6 +458,16 @@ export function JobPage() {
           />
         )}
       </div>
+      {job.files.length > 0 && (
+        <div className="card stack">
+          <strong>Output</strong>
+          {job.files.map((f) => (
+            <a key={f} className="button secondary" href={`/api/jobs/${job.id}/files/${encodeURIComponent(f)}`} download>
+              <Icon name="download" size={16} /> Download {f}
+            </a>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -589,6 +593,14 @@ function SendToPrinter({ job }: { job: Job }) {
         )}
       </div>
       {live && <BedFlag p={live} />}
+      {live?.connected && live.webcams.length > 0 ? (
+        <div className="send-cam">
+          <p className="small muted">Check the bed is clear before you send:</p>
+          <Webcam key={live.id} printerId={live.id} index={0} name={live.webcams[0]} />
+        </div>
+      ) : live?.connected ? (
+        <p className="small muted">No webcam on {live.name}; check the bed in person before starting.</p>
+      ) : null}
       {gcodes.length > 1 && (
         <label>
           File

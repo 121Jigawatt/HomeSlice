@@ -7,10 +7,28 @@ const MAX_GCODE_BYTES = 200 * 1024 ** 2;
 
 interface Parsed {
   ext: Float32Array;
+  extSupport: Uint8Array;
   trav: Float32Array;
   extEnds: Int32Array;
   travEnds: Int32Array;
   layerZ: Float32Array;
+}
+
+const SUPPORT_COLOUR = 0xf59e0b;
+
+/** Extrusion lines coloured per segment: model in the accent colour, supports in amber. */
+function extrusionLines(data: Float32Array, support: Uint8Array): THREE.LineSegments {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(data, 3));
+  const colours = new Float32Array(data.length);
+  const model = new THREE.Color(ACCENT);
+  const sup = new THREE.Color(SUPPORT_COLOUR);
+  for (let s = 0; s < support.length; s++) {
+    const c = support[s] ? sup : model;
+    colours.set([c.r, c.g, c.b, c.r, c.g, c.b], s * 6);
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colours, 3));
+  return new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 }));
 }
 
 function lines(data: Float32Array, color: number, opacity = 1): THREE.LineSegments {
@@ -29,6 +47,7 @@ export default function GcodeViewer({ jobId, file, printerPreset }: { jobId: str
   const [parsed, setParsed] = useState<Parsed | null>(null);
   const [layer, setLayer] = useState(0);
   const [showTravel, setShowTravel] = useState(false);
+  const [hasSupport, setHasSupport] = useState(false);
   const [status, setStatus] = useState("Loading G-code…");
 
   useEffect(() => {
@@ -61,6 +80,7 @@ export default function GcodeViewer({ jobId, file, printerPreset }: { jobId: str
       });
       if (cancelled) return;
       setParsed(result);
+      setHasSupport(result.extSupport.some((v) => v === 1));
       setLayer(Math.max(0, result.layerZ.length - 1));
       setStatus(result.layerZ.length ? "" : "No layers found in this G-code.");
     })().catch((e) => !cancelled && setStatus((e as Error).message));
@@ -75,7 +95,7 @@ export default function GcodeViewer({ jobId, file, printerPreset }: { jobId: str
     const viewer = viewerRef.current;
     if (!viewer || !parsed) return;
     const root = new THREE.Group();
-    const ext = lines(parsed.ext, ACCENT, 0.85);
+    const ext = extrusionLines(parsed.ext, parsed.extSupport);
     const trav = lines(parsed.trav, 0x8b9ab3, 0.35);
     const current = lines(new Float32Array(parsed.ext), 0xf0fdfa);
     root.add(ext, trav, current);
@@ -144,6 +164,19 @@ export default function GcodeViewer({ jobId, file, printerPreset }: { jobId: str
               aria-valuetext={`Layer ${layer + 1} of ${count}`}
             />
           </label>
+          <div className="row small gcode-legend" aria-label="Colour key">
+            <span>
+              <i style={{ background: "#14b8a6" }} /> Model
+            </span>
+            {hasSupport && (
+              <span>
+                <i style={{ background: "#f59e0b" }} /> Supports
+              </span>
+            )}
+            <span>
+              <i style={{ background: "#f0fdfa" }} /> Current layer
+            </span>
+          </div>
           <div className="row between">
             <label className="row check small">
               <input type="checkbox" checked={showTravel} onChange={(e) => setShowTravel(e.target.checked)} /> Show

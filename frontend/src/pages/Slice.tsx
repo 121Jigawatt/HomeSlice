@@ -11,6 +11,30 @@ type Incompat = { process: Record<string, string>; filament: Record<string, stri
 
 const ModelViewer = lazy(() => import("../viewer/ModelViewer"));
 
+type Supports = "" | "off" | "normal" | "tree";
+const SUPPORT_LABELS: Record<Supports, string> = { "": "Process default", off: "Off", normal: "Normal", tree: "Tree" };
+interface LayerInfo {
+  nozzle: number;
+  min: number;
+  max: number;
+  heights: number[];
+  process_default: number | null;
+}
+
+function supportsFrom(ov: Record<string, string>): Supports {
+  const on = ov.enable_support;
+  if (!on) return "";
+  if (on === "0" || on === "false") return "off";
+  return ov.support_type?.startsWith("tree") ? "tree" : "normal";
+}
+
+/** Settings remembered before Off/Normal/Tree existed stored "true"/"false". */
+function normalizeSupports(v: string): Supports {
+  if (v === "false") return "off";
+  if (v === "true") return "normal";
+  return (["", "off", "normal", "tree"] as string[]).includes(v) ? (v as Supports) : "";
+}
+
 /** Everything needed to repeat a slice; remembered per model and restored from past jobs. */
 interface SliceSettings {
   printer: string;
@@ -19,7 +43,7 @@ interface SliceSettings {
   bedType: string;
   layerHeight: string;
   infill: string;
-  supports: "" | "true" | "false";
+  supports: Supports;
   arrange: boolean;
   orient: boolean;
 }
@@ -34,7 +58,7 @@ function fromJob(job: Job): SliceSettings {
     bedType: ov.curr_bed_type ?? "Textured PEI Plate",
     layerHeight: ov.layer_height ?? "",
     infill: ov.sparse_infill_density?.replace("%", "") ?? "",
-    supports: ov.enable_support === "1" || ov.enable_support === "true" ? "true" : ov.enable_support ? "false" : "",
+    supports: supportsFrom(ov),
     arrange: p.arrange ?? true,
     orient: p.orient ?? false,
   };
@@ -61,7 +85,8 @@ export default function SlicePage() {
   const [layerHeight, setLayerHeight] = useState("");
   const [bedType, setBedType] = useState(() => localStorage.getItem("slice.bedType") ?? "Textured PEI Plate");
   const [infill, setInfill] = useState("");
-  const [supports, setSupports] = useState<"" | "true" | "false">("");
+  const [supports, setSupports] = useState<Supports>("");
+  const [layerInfo, setLayerInfo] = useState<LayerInfo | null>(null);
   const [arrange, setArrange] = useState(true);
   const [orient, setOrient] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +135,7 @@ export default function SlicePage() {
     setBedType(s.bedType);
     setLayerHeight(s.layerHeight);
     setInfill(s.infill);
-    setSupports(s.supports);
+    setSupports(normalizeSupports(s.supports));
     setArrange(s.arrange);
     setOrient(s.orient);
   }
@@ -179,6 +204,26 @@ export default function SlicePage() {
     };
   }, [printer]);
 
+  useEffect(() => {
+    if (!printer) return setLayerInfo(null);
+    let cancelled = false;
+    const q = new URLSearchParams({ printer });
+    if (process) q.set("process", process);
+    api<LayerInfo>(`/api/layer-heights?${q}`)
+      .then((r) => !cancelled && setLayerInfo(r))
+      .catch(() => !cancelled && setLayerInfo(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [printer, process]);
+
+  // A remembered or copied value outside the list is kept as an extra choice rather than silently dropped.
+  const layerChoices = useMemo(() => {
+    const list = (layerInfo?.heights ?? []).map((h) => String(h));
+    if (layerHeight && !list.some((h) => Number(h) === Number(layerHeight))) list.push(layerHeight);
+    return list.sort((a, b) => Number(a) - Number(b));
+  }, [layerInfo, layerHeight]);
+
   const noUserPresets = useMemo(
     () => presetsLoaded && !includeSystem && presets.printer.length === 0,
     [presetsLoaded, includeSystem, presets.printer.length],
@@ -195,6 +240,8 @@ export default function SlicePage() {
   if (selected.size === 0) blockers.push("Select at least one model.");
   if (totalObjects > 200) blockers.push(`At most 200 objects can be sliced at once (you have ${totalObjects}).`);
   if (!printer) blockers.push("Choose a printer preset.");
+  if (layerHeight && layerInfo && (Number(layerHeight) < layerInfo.min - 1e-9 || Number(layerHeight) > layerInfo.max + 1e-9))
+    blockers.push(`Layer height ${layerHeight} mm is outside what this printer allows (${layerInfo.min}–${layerInfo.max} mm).`);
   if (target && printer !== target.printer_preset)
     blockers.push(`The printer profile must be ${target.name}'s ("${displayName(target.printer_preset ?? "")}").`);
   if (!process) blockers.push("Choose a process preset.");
@@ -218,7 +265,12 @@ export default function SlicePage() {
     const overrides: Record<string, string> = { curr_bed_type: bedType };
     if (layerHeight) overrides.layer_height = layerHeight;
     if (infill) overrides.sparse_infill_density = `${infill}%`;
-    if (supports) overrides.enable_support = supports;
+    if (supports === "off") overrides.enable_support = "0";
+    if (supports === "normal" || supports === "tree") {
+      overrides.enable_support = "1";
+      // "auto": manual mode only supports painted areas, which HomeSlice can't paint.
+      overrides.support_type = `${supports}(auto)`;
+    }
     const settings: SliceSettings = { printer, process, filaments, bedType, layerHeight, infill, supports, arrange, orient };
     localStorage.setItem("slice.printer", printer);
     localStorage.setItem("slice.process", process);
@@ -421,8 +473,22 @@ export default function SlicePage() {
       <fieldset className="card form-grid">
         <legend>Quick overrides (optional)</legend>
         <label>
-          Layer height (mm)
-          <input type="number" step="0.01" min="0.02" max="1.2" value={layerHeight} onChange={(e) => setLayerHeight(e.target.value)} placeholder="Profile default" />
+          Layer height
+          <select value={layerHeight} onChange={(e) => setLayerHeight(e.target.value)} disabled={!printer}>
+            <option value="">
+              Process default{layerInfo?.process_default ? ` (${layerInfo.process_default} mm)` : ""}
+            </option>
+            {layerChoices.map((h) => (
+              <option key={h} value={h}>
+                {h} mm{h === String(layerInfo?.process_default) ? " (default)" : ""}
+              </option>
+            ))}
+          </select>
+          {layerInfo && (
+            <span className="muted small">
+              {layerInfo.nozzle} mm nozzle: {layerInfo.min}–{layerInfo.max} mm
+            </span>
+          )}
         </label>
         <label>
           Infill density (%)
@@ -430,10 +496,11 @@ export default function SlicePage() {
         </label>
         <label>
           Supports
-          <select value={supports} onChange={(e) => setSupports(e.target.value as "" | "true" | "false")}>
+          <select value={supports} onChange={(e) => setSupports(e.target.value as Supports)}>
             <option value="">Profile default</option>
-            <option value="true">On</option>
-            <option value="false">Off</option>
+            <option value="off">Off</option>
+            <option value="normal">Normal</option>
+            <option value="tree">Tree</option>
           </select>
         </label>
         <label className="row check">
@@ -468,7 +535,7 @@ export default function SlicePage() {
           <dt>Infill</dt>
           <dd>{infill ? `${infill}%` : "Process default"}</dd>
           <dt>Supports</dt>
-          <dd>{supports === "true" ? "On" : supports === "false" ? "Off" : "Process default"}</dd>
+          <dd>{SUPPORT_LABELS[supports]}</dd>
         </dl>
         {blockers.length > 0 ? (
           <div id="slice-blockers" className="blockers" role="status">

@@ -189,8 +189,18 @@ class Printers:
             return
         if state in FINISHED_STATES and row["last_state"] not in FINISHED_STATES:
             self._db.execute(
-                "UPDATE printers SET needs_attention=1, attention_reason=?, last_state=? WHERE id=?",
+                "UPDATE printers SET attention_reason = CASE WHEN needs_attention=1 AND attention_reason IS NOT NULL "
+                "THEN attention_reason ELSE ? END, needs_attention=1, last_state=? WHERE id=?",
                 (FINISHED_REASON[state], state, printer_id),
+            )
+        elif state in ACTIVE_STATES and row["last_state"] not in ACTIVE_STATES:
+            # A new print started, so someone cleared the bed; manual flags (other reasons) stay.
+            placeholders = ",".join("?" * len(FINISHED_REASON))
+            self._db.execute(
+                f"UPDATE printers SET needs_attention = CASE WHEN attention_reason IN ({placeholders}) THEN 0 "
+                f"ELSE needs_attention END, attention_reason = CASE WHEN attention_reason IN ({placeholders}) "
+                "THEN NULL ELSE attention_reason END, last_state=? WHERE id=?",
+                (*FINISHED_REASON.values(), *FINISHED_REASON.values(), state, printer_id),
             )
         else:
             self._db.execute("UPDATE printers SET last_state=? WHERE id=?", (state, printer_id))

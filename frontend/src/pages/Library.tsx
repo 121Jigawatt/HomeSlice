@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { api, formatBytes, ImportPreview, Model, uploadModel } from "../api";
 import { Icon } from "../icons";
 import { ModelThumb } from "../ModelThumb";
-import { PrinterStrip } from "../printers";
 import { GettingStarted } from "../setup";
 import { useToast } from "../toast";
 import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
@@ -141,7 +140,6 @@ export default function LibraryPage() {
           aria-label="Choose model files to upload"
         />
       </div>
-      <PrinterStrip />
       <GettingStarted modelCount={models ? models.length : null} />
       {dragging && (
         <div className="drop-overlay" aria-hidden="true">

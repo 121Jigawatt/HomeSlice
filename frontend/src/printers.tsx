@@ -133,8 +133,8 @@ function temp(t: { temp: number | null; target: number | null } | null | undefin
   return t.target ? `${Math.round(t.temp)}/${Math.round(t.target)}°` : `${Math.round(t.temp)}°`;
 }
 
-function PrinterCard({ p }: { p: LivePrinter }) {
-  const [open, setOpen] = useState(false);
+function PrinterCard({ p, defaultOpen = false }: { p: LivePrinter; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const active = p.state === "printing" || p.state === "paused";
   const pct = p.progress != null ? Math.round(p.progress * 100) : null;
   return (
@@ -185,7 +185,7 @@ function PrinterCard({ p }: { p: LivePrinter }) {
   );
 }
 
-function Webcam({ printerId, index, name }: { printerId: string; index: number; name: string }) {
+export function Webcam({ printerId, index, name }: { printerId: string; index: number; name: string }) {
   const [live, setLive] = useState(false);
   const [tick, setTick] = useState(0);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -221,16 +221,16 @@ function Webcam({ printerId, index, name }: { printerId: string; index: number; 
   );
 }
 
-/** Persistent printer status shown at the top of Library, Slice and Jobs. */
-export function PrinterStrip() {
+/** Live printer status: compact on Slice and Jobs, expanded (webcams open) on the Printers page. */
+export function PrinterStrip({ expanded = false }: { expanded?: boolean }) {
   const { printers } = useLivePrinters();
   const announce = useStateAnnouncements(printers);
   if (!printers || printers.length === 0) return null;
   return (
-    <section className="printer-strip" aria-label="Printers">
+    <section className={`printer-strip${expanded ? " expanded" : ""}`} aria-label="Printers">
       <ul className="printer-list">
         {printers.map((p) => (
-          <PrinterCard key={p.id} p={p} />
+          <PrinterCard key={p.id} p={p} defaultOpen={expanded} />
         ))}
       </ul>
       <div className="sr-only" aria-live="polite">

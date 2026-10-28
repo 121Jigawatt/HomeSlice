@@ -34,7 +34,7 @@ code { font-size: 0.85em; word-break: break-all; }
 .content { flex: 1; padding: 1rem; padding-bottom: 5rem; max-width: 760px; width: 100%; margin: 0 auto; }
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   background: var(--card); border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -193,6 +193,10 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .orca-frame { flex: 1; width: 100%; border: 0; background: #000; }
 
 .import-go { align-self: flex-end; }
+.send-cam p { margin: 0 0 0.35rem; }
+.gcode-legend { gap: 0.9rem; color: var(--muted); }
+.gcode-legend i { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 3px; vertical-align: -1px; margin-right: 0.3rem; }
+.printer-strip.expanded .printer-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); }
 .printer-row { border-bottom: 1px solid var(--border); padding-bottom: 0.6rem; }
 .printer-profiles { margin-top: 0.5rem; }
 .warn-inline { color: #fde68a; }

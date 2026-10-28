@@ -16,6 +16,7 @@ type IconName =
   | "more"
   | "close"
   | "trash"
+  | "printer"
   | "menu"
   | "upload"
   | "orca";
@@ -39,6 +40,7 @@ const PATHS: Record<IconName, string> = {
   more: "M5 12h.01M12 12h.01M19 12h.01",
   close: "M18 6L6 18M6 6l12 12",
   trash: "M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15M10 11v6M14 11v6",
+  printer: "M4 3h16v18H4zM4 7h16M8 11h8v4l-4 2-4-2zM12 17v1",
   menu: "M3 6h18M3 12h18M3 18h18",
   upload: "M12 21V9M7 14l5-5 5 5M5 3h14",
   orca: "M3 5h18v12H3zM8 21h8M12 17v4",

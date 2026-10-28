@@ -6,6 +6,7 @@ import LibraryPage from "./pages/Library";
 import SlicePage from "./pages/Slice";
 import { JobPage, JobsPage } from "./pages/Jobs";
 import SettingsPage from "./pages/Settings";
+import PrintersPage from "./pages/Printers";
 import { PrinterProvider } from "./printers";
 import { JobWatcher } from "./jobWatcher";
 import { ToastProvider } from "./toast";
@@ -90,6 +91,7 @@ export default function App() {
           <Route path="/slice" element={<SlicePage />} />
           <Route path="/jobs" element={<JobsPage />} />
           <Route path="/jobs/:id" element={<JobSplit />} />
+          <Route path="/printers" element={<PrintersPage />} />
           <Route path="/settings" element={<SettingsPage username={status.username ?? ""} onLogout={refresh} />} />
           <Route path="*" element={<Navigate to="/library" replace />} />
         </Routes>
@@ -115,6 +117,7 @@ const NAV: [string, string, IconName][] = [
   ["/library", "Library", "library"],
   ["/slice", "Slice", "slice"],
   ["/jobs", "Jobs", "jobs"],
+  ["/printers", "Printers", "printer"],
   ["/settings", "Settings", "settings"],
 ];
 

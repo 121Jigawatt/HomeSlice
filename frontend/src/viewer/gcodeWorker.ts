@@ -3,6 +3,8 @@
 
 interface Out {
   ext: number[];
+  // 1 per extrusion segment that is support material (Orca/Prusa ";TYPE:Support...").
+  extSupport: number[];
   trav: number[];
   extEnds: number[];
   travEnds: number[];
@@ -12,7 +14,8 @@ interface Out {
 const ARC_SEGMENT_MM = 1;
 
 function parse(text: string): Out {
-  const out: Out = { ext: [], trav: [], extEnds: [], travEnds: [], layerZ: [] };
+  const out: Out = { ext: [], extSupport: [], trav: [], extEnds: [], travEnds: [], layerZ: [] };
+  let support = false;
   let x = 0, y = 0, z = 0, e = 0;
   let absXYZ = true, absE = true;
   // Orca/Bambu/Prusa slicers mark layers with ";Z:<height>"; otherwise fall back to Z changes.
@@ -40,6 +43,7 @@ function parse(text: string): Out {
 
     if (raw.startsWith(";")) {
       if (hasMarkers && raw.startsWith(";Z:")) startLayer(parseFloat(raw.slice(3)));
+      else if (raw.startsWith(";TYPE:")) support = /^;TYPE:\s*Support/i.test(raw);
       continue;
     }
     const semi = raw.indexOf(";");
@@ -84,10 +88,12 @@ function parse(text: string): Out {
           const a = a0 + (a1 - a0) * t;
           const qx = cx + r * Math.cos(a), qy = cy + r * Math.sin(a), qz = z + (nz - z) * t;
           target.push(px, py, pz, qx, qy, qz);
+          if (extruding) out.extSupport.push(support ? 1 : 0);
           px = qx; py = qy; pz = qz;
         }
       } else if (nx !== x || ny !== y || nz !== z) {
         target.push(x, y, z, nx, ny, nz);
+        if (extruding) out.extSupport.push(support ? 1 : 0);
       }
       x = nx; y = ny; z = nz;
     }
@@ -100,15 +106,17 @@ self.onmessage = (event: MessageEvent<string>) => {
   try {
     const r = parse(event.data);
     const ext = new Float32Array(r.ext);
+    const extSupport = Uint8Array.from(r.extSupport);
     const trav = new Float32Array(r.trav);
     const msg = {
       ext,
+      extSupport,
       trav,
       extEnds: Int32Array.from(r.extEnds),
       travEnds: Int32Array.from(r.travEnds),
       layerZ: Float32Array.from(r.layerZ),
     };
-    (self as unknown as Worker).postMessage(msg, [ext.buffer, trav.buffer, msg.extEnds.buffer, msg.travEnds.buffer, msg.layerZ.buffer]);
+    (self as unknown as Worker).postMessage(msg, [ext.buffer, extSupport.buffer, trav.buffer, msg.extEnds.buffer, msg.travEnds.buffer, msg.layerZ.buffer]);
   } catch (err) {
     (self as unknown as Worker).postMessage({ error: String(err) });
   }

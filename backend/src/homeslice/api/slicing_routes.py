@@ -78,6 +78,43 @@ def printer_bed(name: str, request: Request, _: Session = Depends(require_sessio
     return {"area": points, "height": height}
 
 
+COMMON_LAYER_HEIGHTS = (0.06, 0.08, 0.10, 0.12, 0.16, 0.20, 0.24, 0.28, 0.32, 0.36, 0.40, 0.48, 0.56, 0.64, 0.72, 0.80)
+
+
+def _first_float(value, default: float | None = None) -> float | None:
+    if isinstance(value, list):
+        value = value[0] if value else None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@router.get("/layer-heights")
+def layer_heights(
+    printer: str, request: Request, process: str | None = None, _: Session = Depends(require_session)
+) -> dict:
+    """Common layer heights the printer profile allows (its min/max layer height, else 25-75% of the nozzle)."""
+    profiles = request.app.state.services.profiles
+    try:
+        preset = profiles.resolve("printer", printer)
+    except ProfileError as e:
+        raise HTTPException(404, str(e)) from None
+    nozzle = _first_float(preset.get("nozzle_diameter"), 0.4) or 0.4
+    lo = _first_float(preset.get("min_layer_height")) or round(nozzle * 0.2, 2)
+    hi = _first_float(preset.get("max_layer_height")) or round(nozzle * 0.75, 2)
+    if hi <= 0:
+        hi = round(nozzle * 0.75, 2)
+    default = None
+    if process:
+        try:
+            default = _first_float(profiles.resolve("process", process).get("layer_height"))
+        except ProfileError:
+            default = None
+    heights = [h for h in COMMON_LAYER_HEIGHTS if lo - 1e-9 <= h <= hi + 1e-9]
+    return {"nozzle": nozzle, "min": lo, "max": hi, "heights": heights, "process_default": default}
+
+
 @router.post("/jobs", status_code=202)
 def create_job(body: JobBody, request: Request, session: Session = Depends(require_session)) -> dict:
     services = request.app.state.services
