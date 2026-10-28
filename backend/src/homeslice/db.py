@@ -88,6 +88,11 @@ ADDED_COLUMNS = [
     ("printers", "needs_attention", "INTEGER NOT NULL DEFAULT 0"),
     ("printers", "attention_reason", "TEXT"),
     ("printers", "last_state", "TEXT"),
+    # The OrcaSlicer printer preset this machine prints; G-code sliced with any other preset is refused.
+    ("printers", "printer_preset", "TEXT"),
+    ("printers", "default_process", "TEXT"),
+    ("printers", "default_filaments", "TEXT"),
+    ("printers", "default_bed_type", "TEXT"),
 ]
 
 

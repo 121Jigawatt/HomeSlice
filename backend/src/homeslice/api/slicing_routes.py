@@ -8,6 +8,7 @@ from ..auth import Session
 from ..orca.cli import SliceArgsError
 from ..orca.jobs import JobRequest
 from ..orca.profiles import KIND_DIRS, ProfileError
+from ..printers.moonraker import PrinterError
 from .deps import client_ip, require_session
 
 router = APIRouter(prefix="/api", tags=["slicing"])
@@ -22,6 +23,8 @@ class JobBody(BaseModel):
     arrange: bool = True
     orient: bool = False
     plate: int = Field(default=0, ge=0, le=99)
+    # Physical printer the result is meant for; its printer profile must match `printer`.
+    target_printer_id: str | None = Field(default=None, max_length=64)
 
 
 def _job_id(job_id: str) -> str:
@@ -77,8 +80,18 @@ def printer_bed(name: str, request: Request, _: Session = Depends(require_sessio
 @router.post("/jobs", status_code=202)
 def create_job(body: JobBody, request: Request, session: Session = Depends(require_session)) -> dict:
     services = request.app.state.services
+    if body.target_printer_id:
+        try:
+            target = services.printers.get(body.target_printer_id)
+            if target is None:
+                raise HTTPException(400, "Unknown target printer")
+            services.printers.check_gcode_fits(target, body.printer)
+        except PrinterError as e:
+            raise HTTPException(400, str(e)) from None
     try:
-        job_id = services.jobs.submit(JobRequest(**body.model_dump()), owner=session.username)
+        job_id = services.jobs.submit(
+            JobRequest(**body.model_dump(exclude={"target_printer_id"})), owner=session.username
+        )
     except (SliceArgsError, ValueError) as e:
         raise HTTPException(400, str(e)) from None
     services.auth.audit(session.username, "slice_submit", job_id, client_ip(request))

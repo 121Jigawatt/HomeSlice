@@ -142,6 +142,10 @@ export interface Printer {
   url: string;
   address: string | null;
   has_api_key: boolean;
+  printer_preset: string | null;
+  default_process: string | null;
+  default_filaments: string[];
+  default_bed_type: string | null;
 }
 
 export interface PrinterStatus {

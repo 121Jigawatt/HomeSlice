@@ -99,7 +99,9 @@ def printer_setup(authed):
     services.printers.resolve = False
     r = authed.post("/api/printers", json={"name": "SV08", "url": "http://10.69.69.165/", "api_key": "s3cret"})
     assert r.status_code == 201, r.text
-    return authed, fake, r.json()
+    # make_done_job slices for preset "P"; the machine must be set up with that profile to accept it.
+    services.printers.set_profiles(r.json()["id"], "P", None, [], None)
+    return authed, fake, services.printers.get(r.json()["id"])
 
 
 def make_done_job(authed) -> str:

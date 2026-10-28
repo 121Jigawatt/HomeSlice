@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 
 from ..auth import Session
 from ..library.validation import ValidationError
-from ..printers.moonraker import PrinterBusy, PrinterError
+from ..orca.profiles import ProfileError
+from ..printers.moonraker import PrinterBusy, PrinterError, PrinterMismatch
 from ..printers.queue import QueueError
 from .deps import client_ip, require_session
 
@@ -167,6 +168,7 @@ async def send_job(job_id: str, body: SendBody, request: Request, session: Sessi
         printer = services.printers.get(body.printer_id)
         if printer is None:
             raise HTTPException(404, "Unknown printer")
+        services.printers.check_gcode_fits(printer, job["params"].get("printer"))
         if body.start and (reason := services.printers.needs_attention(body.printer_id)):
             raise HTTPException(409, f"{printer['name']} needs attention: {reason} Confirm the bed is clear first.")
         remote = remote_name(services, job, body.file)
@@ -174,6 +176,8 @@ async def send_job(job_id: str, body: SendBody, request: Request, session: Sessi
             body.printer_id, lambda client: client.upload(path, remote, start=body.start)
         )
     except PrinterBusy as e:
+        raise HTTPException(409, str(e)) from None
+    except PrinterMismatch as e:
         raise HTTPException(409, str(e)) from None
     except PrinterError as e:
         raise HTTPException(502, str(e)) from None
@@ -188,6 +192,48 @@ async def send_job(job_id: str, body: SendBody, request: Request, session: Sessi
 class AttentionBody(BaseModel):
     needs_attention: bool
     reason: str | None = Field(default=None, max_length=200)
+
+
+class ProfilesBody(BaseModel):
+    printer_preset: str | None = Field(default=None, max_length=200)
+    process: str | None = Field(default=None, max_length=200)
+    filaments: list[str] = Field(default_factory=list, max_length=16)
+    bed_type: str | None = Field(default=None, max_length=64)
+
+
+@router.put("/printers/{printer_id}/profiles")
+def set_printer_profiles(
+    printer_id: str, body: ProfilesBody, request: Request, session: Session = Depends(require_session)
+) -> dict:
+    """Links a physical printer to the OrcaSlicer profile it prints, plus defaults for the Slice page."""
+    services = request.app.state.services
+    try:
+        printer = services.printers.get(printer_id)
+    except PrinterError:
+        printer = None
+    if printer is None:
+        raise HTTPException(404, "Not found")
+    preset = (body.printer_preset or "").strip() or None
+    process = (body.process or "").strip() or None
+    filaments = [f.strip() for f in body.filaments if f.strip()]
+    profiles = services.profiles
+    try:
+        known = {k: {p["name"] for p in profiles.list(k, True)} for k in ("printer", "process", "filament")}
+        if preset and preset not in known["printer"]:
+            raise HTTPException(400, f'Unknown printer profile "{preset}"')
+        if (process or filaments) and not preset:
+            raise HTTPException(400, "Choose the printer profile before default process or filament")
+        bad = profiles.incompatible(preset) if preset else {"process": {}, "filament": {}}
+    except ProfileError as e:
+        raise HTTPException(400, str(e)) from None
+    if process and (process not in known["process"] or process in bad["process"]):
+        raise HTTPException(400, f'Process "{process}" doesn\'t suit "{preset}"')
+    for f in filaments:
+        if f not in known["filament"] or f in bad["filament"]:
+            raise HTTPException(400, f'Filament "{f}" doesn\'t suit "{preset}"')
+    services.printers.set_profiles(printer_id, preset, process, filaments, (body.bed_type or "").strip() or None)
+    services.auth.audit(session.username, "printer_profiles", f"{printer['name']} -> {preset}", client_ip(request))
+    return services.printers.get(printer_id)
 
 
 @router.put("/printers/{printer_id}/attention")
@@ -234,6 +280,15 @@ def add_to_queue(body: QueueBody, request: Request, session: Session = Depends(r
     job = services.jobs.get(job_id)
     if job is None or job["status"] != "done":
         raise HTTPException(409, "Only finished jobs can be queued")
+    try:
+        target = services.printers.get(body.printer_id)
+        if target is None:
+            raise QueueError("Unknown printer")
+        services.printers.check_gcode_fits(target, job["params"].get("printer"))
+    except PrinterMismatch as e:
+        raise HTTPException(409, str(e)) from None
+    except (QueueError, PrinterError) as e:
+        raise HTTPException(400, str(e)) from None
     try:
         item = services.queue.add(job_id, body.printer_id, body.file, session.username)
     except (QueueError, PrinterError) as e:

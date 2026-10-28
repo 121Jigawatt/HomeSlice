@@ -1,8 +1,8 @@
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, Job, Model, Preset } from "../api";
+import { api, Job, Model, Preset, Printer as PrinterConfig } from "../api";
 import { ModelPicker } from "../ModelPicker";
-import { displayName } from "../presetNames";
+import { BED_TYPES, bedLabel, displayName } from "../presetNames";
 import { formatDuration, IDLE_STATES, PrinterBadge, PrinterStrip, useLivePrinters } from "../printers";
 import { useToast } from "../toast";
 
@@ -10,17 +10,6 @@ type Kind = "printer" | "process" | "filament";
 type Incompat = { process: Record<string, string>; filament: Record<string, string> };
 
 const ModelViewer = lazy(() => import("../viewer/ModelViewer"));
-
-// Orca's curr_bed_type values and the labels Orca shows for them.
-const BED_TYPES: [string, string][] = [
-  ["Textured PEI Plate", "Textured PEI Plate"],
-  ["High Temp Plate", "Smooth High Temp Plate"],
-  ["Engineering Plate", "Engineering Plate"],
-  ["Cool Plate", "Smooth Cool Plate"],
-  ["Textured Cool Plate", "Textured Cool Plate"],
-  ["Supertack Plate", "Cool Plate (SuperTack)"],
-];
-const bedLabel = (v: string) => BED_TYPES.find(([value]) => value === v)?.[1] ?? v;
 
 /** Everything needed to repeat a slice; remembered per model and restored from past jobs. */
 interface SliceSettings {
@@ -77,8 +66,40 @@ export default function SlicePage() {
   const [busy, setBusy] = useState(false);
   const [prefillNote, setPrefillNote] = useState<string | null>(null);
   const { printers: machines } = useLivePrinters();
-  const [target, setTarget] = useState(() => localStorage.getItem("send.printer") ?? "");
-  const machine = machines?.find((m) => m.id === target) ?? machines?.[0];
+  const [configs, setConfigs] = useState<PrinterConfig[] | null>(null);
+  const [targetId, setTargetId] = useState("");
+  const [prefilled, setPrefilled] = useState<boolean | null>(null);
+  const target = configs?.find((c) => c.id === targetId && c.printer_preset);
+  const machine = machines?.find((m) => m.id === target?.id);
+
+  function applyTarget(c: PrinterConfig | undefined) {
+    setTargetId(c?.id ?? "");
+    localStorage.setItem("send.printer", c?.id ?? "");
+    if (!c?.printer_preset) return;
+    setPrinter(c.printer_preset);
+    if (c.default_process) setProcess(c.default_process);
+    if (c.default_filaments.length) setFilaments(c.default_filaments);
+    if (c.default_bed_type) setBedType(c.default_bed_type);
+  }
+
+  useEffect(() => {
+    api<PrinterConfig[]>("/api/printers").then(setConfigs).catch(() => setConfigs([]));
+  }, []);
+
+  // Once printers and any pre-fill are known: a pre-filled slice keeps its profile and targets the printer that
+  // uses it; otherwise the last-used (or first) set-up printer's defaults apply.
+  useEffect(() => {
+    if (!configs || prefilled === null || targetId) return;
+    const ready = configs.filter((c) => c.printer_preset);
+    if (prefilled) {
+      const match = ready.find((c) => c.printer_preset === printer);
+      setTargetId(match?.id ?? "");
+      return;
+    }
+    const stored = localStorage.getItem("send.printer");
+    applyTarget(ready.find((c) => c.id === stored) ?? ready[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configs, prefilled]);
 
   function apply(s: SliceSettings) {
     setPrinter(s.printer);
@@ -101,8 +122,12 @@ export default function SlicePage() {
           apply(fromJob(job));
           setSelected(new Set(job.params.model_ids));
           setPrefillNote(`Settings copied from the job for ${job.title ?? "a previous slice"}.`);
+          setPrefilled(true);
         })
-        .catch((e) => setError(e.message));
+        .catch((e) => {
+          setError(e.message);
+          setPrefilled(false);
+        });
       return;
     }
     const ids = params.getAll("model");
@@ -111,10 +136,13 @@ export default function SlicePage() {
       try {
         apply(JSON.parse(saved) as SliceSettings);
         setPrefillNote("Using the settings you last sliced this model with.");
+        setPrefilled(true);
+        return;
       } catch {
         /* ignore a corrupt entry */
       }
     }
+    setPrefilled(false);
   }, [params]);
 
   useEffect(() => {
@@ -158,6 +186,8 @@ export default function SlicePage() {
   const blockers: string[] = [];
   if (selected.size === 0) blockers.push("Select at least one model.");
   if (!printer) blockers.push("Choose a printer preset.");
+  if (target && printer !== target.printer_preset)
+    blockers.push(`The printer profile must be ${target.name}'s ("${displayName(target.printer_preset ?? "")}").`);
   if (!process) blockers.push("Choose a process preset.");
   else if (incompat.process[process])
     blockers.push(`Process "${displayName(process)}" doesn't suit this printer (${incompat.process[process]}).`);
@@ -190,7 +220,16 @@ export default function SlicePage() {
     try {
       const job = await api<{ id: string }>("/api/jobs", {
         method: "POST",
-        json: { model_ids: [...selected], printer, process, filaments: chosenFilaments, overrides, arrange, orient },
+        json: {
+          model_ids: [...selected],
+          printer,
+          process,
+          filaments: chosenFilaments,
+          overrides,
+          arrange,
+          orient,
+          target_printer_id: target?.id ?? null,
+        },
       });
       notify("Slice started.", { action: { label: "View", to: `/jobs/${job.id}` } });
       navigate(`/jobs/${job.id}`);
@@ -238,25 +277,31 @@ export default function SlicePage() {
         )}
       </fieldset>
 
-      {machines && machines.length > 0 && (
+      {configs && configs.length > 0 && (
         <fieldset className="card stack">
           <legend>Target printer</legend>
           <label>
-            Printer to send to after slicing
-            <select
-              value={machine?.id ?? ""}
-              onChange={(e) => {
-                setTarget(e.target.value);
-                localStorage.setItem("send.printer", e.target.value);
-              }}
-            >
-              {machines.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
+            Printer to slice for
+            <select value={target?.id ?? ""} onChange={(e) => applyTarget(configs.find((c) => c.id === e.target.value))}>
+              <option value="">None (slice only, choose profiles freely)</option>
+              {configs.map((c) => (
+                <option key={c.id} value={c.id} disabled={!c.printer_preset}>
+                  {c.name}
+                  {c.printer_preset ? "" : " \u2014 set its profiles in Settings first"}
                 </option>
               ))}
             </select>
           </label>
+          {target ? (
+            <p className="muted small">
+              Uses {target.name}'s printer profile <b title={target.printer_preset ?? ""}>{displayName(target.printer_preset ?? "")}</b>,
+              so the result can only be sent to printers set up with that profile.
+            </p>
+          ) : (
+            <p className="muted small">
+              Without a target, the result can only be sent to a printer whose profile matches the one you pick.
+            </p>
+          )}
           {machine && (
             <div className="row small" aria-live="polite">
               <PrinterBadge state={machine.state} />
@@ -265,6 +310,8 @@ export default function SlicePage() {
                   Busy with {machine.filename} · {formatDuration(machine.remaining)} left. You can slice now and send
                   when it's free.
                 </span>
+              ) : machine.needs_attention ? (
+                <span className="muted">Confirm the bed is clear before it prints. You can slice now.</span>
               ) : IDLE_STATES.has(machine.state) ? (
                 <span className="muted">Free to print.</span>
               ) : (
@@ -289,10 +336,16 @@ export default function SlicePage() {
         </label>
         <label>
           Printer
-          <select value={printer} onChange={(e) => setPrinter(e.target.value)} required title={printer}>
-            <option value="">Select…</option>
-            {options("printer")}
-          </select>
+          {target ? (
+            <select value={printer} disabled title={`Set by ${target.name}. Change it under Settings \u2192 Printers.`}>
+              <option value={printer}>{displayName(printer)} (from {target.name})</option>
+            </select>
+          ) : (
+            <select value={printer} onChange={(e) => setPrinter(e.target.value)} required title={printer}>
+              <option value="">Select…</option>
+              {options("printer")}
+            </select>
+          )}
         </label>
         <label>
           Process

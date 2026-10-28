@@ -2,6 +2,8 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ActivityItem, api, OrcaStatus, Printer, PrinterStatus } from "../api";
 import { useToast } from "../toast";
 import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
+import { PrinterProfiles } from "../printerProfiles";
+import { displayName } from "../presetNames";
 
 export default function SettingsPage({ username, onLogout }: { username: string; onLogout: () => void }) {
   return (
@@ -112,17 +114,33 @@ function Printers() {
       {printers.length === 0 && <p className="muted small">No printers yet. Add a Klipper (Mainsail/Fluidd) printer below.</p>}
       <ul className="list">
         {printers.map((p) => (
-          <li key={p.id} className="row between small">
-            <div className="grow">
-              <div className="title">{p.name}</div>
-              <div className="muted">
-                {p.url} · {states[p.id] ?? "checking…"}
+          <li key={p.id} className="stack printer-row">
+            <div className="row between small">
+              <div className="grow">
+                <div className="title">{p.name}</div>
+                <div className="muted">
+                  {p.url} · {states[p.id] ?? "checking…"}
+                </div>
               </div>
+              <OverflowMenu
+                label={`More actions for ${p.name}`}
+                items={[{ label: "Remove printer…", icon: "trash", danger: true, onSelect: () => remove(p) }]}
+              />
             </div>
-            <OverflowMenu
-              label={`More actions for ${p.name}`}
-              items={[{ label: "Remove printer…", icon: "trash", danger: true, onSelect: () => remove(p) }]}
-            />
+            <details open={!p.printer_preset}>
+              <summary className="small">
+                Slicing profiles:{" "}
+                {p.printer_preset ? (
+                  <b title={p.printer_preset}>{displayName(p.printer_preset)}</b>
+                ) : (
+                  <span className="warn-inline">not set — prints can't be sent to {p.name} yet</span>
+                )}
+              </summary>
+              <PrinterProfiles
+                printer={p}
+                onSaved={(saved) => setPrinters((ps) => ps.map((x) => (x.id === saved.id ? saved : x)))}
+              />
+            </details>
           </li>
         ))}
       </ul>

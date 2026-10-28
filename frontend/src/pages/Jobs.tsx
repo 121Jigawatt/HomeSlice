@@ -485,10 +485,11 @@ function SendToPrinter({ job }: { job: Job }) {
     api<Printer[]>("/api/printers")
       .then((list) => {
         setPrinters(list);
-        setPrinterId((cur) => (list.some((p) => p.id === cur) ? cur : list[0]?.id ?? ""));
+        const fits = list.filter((p) => p.printer_preset === job.params.printer);
+        setPrinterId((cur) => (fits.some((p) => p.id === cur) ? cur : fits[0]?.id ?? ""));
       })
       .catch((e) => setMsg({ ok: false, text: e.message }));
-  }, []);
+  }, [job.params.printer]);
 
   // A printer that becomes busy while confirming must not receive a start.
   useEffect(() => {
@@ -501,6 +502,20 @@ function SendToPrinter({ job }: { job: Job }) {
       <p className="muted small">
         Add a printer in <Link to="/settings">Settings</Link> to send prints directly.
       </p>
+    );
+  if (!printers.some((p) => p.printer_preset === job.params.printer))
+    return (
+      <div className="card stack">
+        <strong>Send to printer</strong>
+        <p className="small">
+          This was sliced with the <b title={job.params.printer}>{displayName(job.params.printer)}</b> printer profile,
+          and none of your printers use it, so it can't be sent. Re-slice it for one of your printers, or set a
+          printer's profile in <Link to="/settings">Settings</Link>.
+        </p>
+        <Link className="button small" to={`/slice?from=${job.id}`}>
+          Re-slice for another printer
+        </Link>
+      </div>
     );
 
   async function send(startNow: boolean) {
@@ -560,8 +575,9 @@ function SendToPrinter({ job }: { job: Job }) {
         Printer
         <select value={printerId} onChange={(e) => setPrinterId(e.target.value)}>
           {printers.map((p) => (
-            <option key={p.id} value={p.id}>
+            <option key={p.id} value={p.id} disabled={p.printer_preset !== job.params.printer}>
               {p.name}
+              {p.printer_preset !== job.params.printer ? " \u2014 sliced for a different printer" : ""}
             </option>
           ))}
         </select>

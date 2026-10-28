@@ -193,6 +193,9 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .orca-frame { flex: 1; width: 100%; border: 0; background: #000; }
 
 .import-go { align-self: flex-end; }
+.printer-row { border-bottom: 1px solid var(--border); padding-bottom: 0.6rem; }
+.printer-profiles { margin-top: 0.5rem; }
+.warn-inline { color: #fde68a; }
 .picked-model { flex-wrap: nowrap; }
 .picker-dialog { width: min(560px, calc(100vw - 1.5rem)); }
 .picker-list { max-height: min(55vh, 28rem); overflow-y: auto; gap: 0.25rem; }

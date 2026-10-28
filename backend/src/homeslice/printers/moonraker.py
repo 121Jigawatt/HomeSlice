@@ -21,6 +21,10 @@ class PrinterBusy(PrinterError):
     pass
 
 
+class PrinterMismatch(PrinterError):
+    """G-code was sliced for a different printer profile than this machine uses."""
+
+
 def normalize_url(url: str) -> str:
     """Base URL only (scheme, host, port); paths, queries and credentials are rejected."""
     parts = urlsplit(url.strip())

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import socket
 import time
 import uuid
@@ -17,6 +18,7 @@ from .moonraker import (
     MoonrakerClient,
     PrinterBusy,
     PrinterError,
+    PrinterMismatch,
     check_lan_ip,
     host_label,
     normalize_url,
@@ -84,6 +86,10 @@ class Printers:
             "has_api_key": bool(row["api_key"]),
             "needs_attention": bool(row["needs_attention"]),
             "attention_reason": row["attention_reason"],
+            "printer_preset": row["printer_preset"],
+            "default_process": row["default_process"],
+            "default_filaments": json.loads(row["default_filaments"] or "[]"),
+            "default_bed_type": row["default_bed_type"],
             "created_at": row["created_at"],
         }
 
@@ -109,6 +115,10 @@ class Printers:
             "resolved_ip": None,
             "needs_attention": 0,
             "attention_reason": None,
+            "printer_preset": None,
+            "default_process": None,
+            "default_filaments": None,
+            "default_bed_type": None,
             "created_at": time.time(),
         }
         self._db.execute(
@@ -122,6 +132,36 @@ class Printers:
     def delete(self, printer_id: str) -> bool:
         self._live_at = 0.0
         return self._db.execute("DELETE FROM printers WHERE id=?", (parse_printer_id(printer_id),)) > 0
+
+    def set_profiles(
+        self,
+        printer_id: str,
+        printer_preset: str | None,
+        process: str | None,
+        filaments: list[str],
+        bed_type: str | None,
+    ) -> bool:
+        return (
+            self._db.execute(
+                "UPDATE printers SET printer_preset=?, default_process=?, default_filaments=?, default_bed_type=? "
+                "WHERE id=?",
+                (printer_preset, process, json.dumps(filaments), bed_type, parse_printer_id(printer_id)),
+            )
+            > 0
+        )
+
+    def check_gcode_fits(self, printer: dict[str, Any], sliced_for: str | None) -> None:
+        """Refuses G-code sliced for a different printer preset than the machine is set up with."""
+        preset = printer.get("printer_preset")
+        if not preset:
+            raise PrinterMismatch(
+                f"{printer['name']} has no OrcaSlicer printer profile yet. Set one under Settings → Printers first."
+            )
+        if sliced_for != preset:
+            raise PrinterMismatch(
+                f"This was sliced for the \"{sliced_for}\" profile, but {printer['name']} uses \"{preset}\". "
+                f"Re-slice it for {printer['name']}."
+            )
 
     def set_attention(self, printer_id: str, needed: bool, reason: str | None = None) -> bool:
         self._live_at = 0.0

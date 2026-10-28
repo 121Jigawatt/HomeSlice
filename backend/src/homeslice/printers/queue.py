@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..db import Database
-from .moonraker import PrinterBusy, PrinterError
+from .moonraker import PrinterBusy, PrinterError, PrinterMismatch
 from .service import Printers, parse_printer_id
 
 log = logging.getLogger("homeslice.queue")
@@ -148,6 +149,16 @@ class PrintQueue:
         path = self._gcode_path(item["job_id"], item["file"])
         if path is None:
             self._finish(item["id"], "failed", "The sliced file no longer exists.")
+            return False
+        # The printer's profile may have changed since this was queued.
+        job = self._db.one("SELECT params FROM jobs WHERE id=?", (item["job_id"],))
+        printer = self._printers.get(item["printer_id"])
+        try:
+            if printer is None:
+                raise PrinterMismatch("Printer was removed.")
+            self._printers.check_gcode_fits(printer, json.loads(job["params"]).get("printer") if job else None)
+        except PrinterMismatch as e:
+            self._finish(item["id"], "failed", str(e))
             return False
         self._db.execute("UPDATE print_queue SET status='sending' WHERE id=?", (item["id"],))
         try:
