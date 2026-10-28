@@ -42,10 +42,24 @@ Until then, finished slices, failed slices and send results are shown as in-app 
 
 Use Tailscale or WireGuard; **don't** port-forward. With Tailscale on the NAS, run `tailscale serve --bg https+insecure://localhost:8443` and use the `https://<nas>.<tailnet>.ts.net` URL.
 
+### Users and roles
+
+The setup account is an **Admin**. Under **Settings → Users**, admins add people with a temporary password (they choose their own at first sign-in) and give them one or more roles. Built-in roles:
+
+| Role | Can |
+| --- | --- |
+| Admin | Everything, including users and roles. Can't be edited or deleted. |
+| Operator | Everything except users, printer setup and OrcaSlicer updates. |
+| Maker | Add models, slice, print, and manage their own models, jobs and queued prints. |
+| Viewer | Browse the library and see printers. |
+
+**Settings → Roles** lets admins edit these or create their own from 14 permissions. People without "See everyone's jobs" only see the jobs they started. The full OrcaSlicer desktop has its own permission, because it can edit profiles and read the app's files. HomeSlice refuses changes that would leave nobody able to manage users. Disabling a user or resetting their password signs them out everywhere.
+
 ## Security model
 
 - First-run setup needs a one-time token from the container log. There are no default credentials.
 - Passwords are hashed with argon2id. Sessions are HttpOnly, `SameSite=Strict` cookies. Every state-changing request needs a CSRF token, and cross-origin requests are blocked.
+- Every API route checks the user's permissions on the server; the UI only hides what a user can't use.
 - Failed logins lock out the IP and the username (app level) and are rate-limited (nginx). Logins, uploads, slices and updates go to an audit log.
 - Uploads:
   - extension allowlist, plus checking the file's actual content
@@ -81,6 +95,6 @@ Frontend (needs Node 22): `cd frontend; npm install; npm run dev`, then open htt
 - [x] Phase 4 (part): Klipper/Moonraker printers (Mainsail, Fluidd): live status, webcams, send/auto-start, per-printer queue with a "bed is clear" safety check
 - [ ] Phase 4: other printer connectors (OctoPrint, PrusaLink, Bambu LAN, Creality)
 - [x] Phase 5 (part): Printables / MakerWorld link import
-- [ ] Multiple user accounts
+- [x] Multiple user accounts with roles (RBAC)
 - [ ] Push notifications (see findings above)
 - [ ] Phase 0 checks to run on real hardware: headless CLI inside the container, preset flattening accepted by the CLI

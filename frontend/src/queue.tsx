@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, QueueItem } from "./api";
+import { useMe } from "./auth";
 import { Icon } from "./icons";
 import { BedFlag, IDLE_STATES, useLivePrinters } from "./printers";
 import { useToast } from "./toast";
@@ -22,7 +23,9 @@ export function PrintQueuePanel() {
   const { printers } = useLivePrinters();
   const confirm = useConfirm();
   const notify = useToast();
-
+  const me = useMe();
+  const canReorder = me.can("printers.queue");
+  const canCancel = (it: QueueItem) => canReorder || (me.can("printers.print") && me.owns(it.owner));
   const load = useCallback(() => api<QueueItem[]>("/api/queue").then(setItems).catch(() => undefined), []);
   useEffect(() => {
     load();
@@ -99,32 +102,38 @@ export function PrintQueuePanel() {
                       {it.job_title ?? it.file}
                     </Link>
                     <span className="muted small wide-only">{it.owner && `by ${it.owner}`}</span>
-                    <button
-                      type="button"
-                      className="icon-button secondary"
-                      disabled={i === 0}
-                      onClick={() => move(printerId, waiting, i, -1)}
-                      aria-label={`Move ${it.job_title ?? it.file} up`}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button secondary"
-                      disabled={i === waiting.length - 1}
-                      onClick={() => move(printerId, waiting, i, 1)}
-                      aria-label={`Move ${it.job_title ?? it.file} down`}
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button secondary"
-                      onClick={() => cancel(it)}
-                      aria-label={`Remove ${it.job_title ?? it.file} from queue`}
-                    >
-                      <Icon name="close" size={16} />
-                    </button>
+                    {canReorder && (
+                      <>
+                        <button
+                          type="button"
+                          className="icon-button secondary"
+                          disabled={i === 0}
+                          onClick={() => move(printerId, waiting, i, -1)}
+                          aria-label={`Move ${it.job_title ?? it.file} up`}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button secondary"
+                          disabled={i === waiting.length - 1}
+                          onClick={() => move(printerId, waiting, i, 1)}
+                          aria-label={`Move ${it.job_title ?? it.file} down`}
+                        >
+                          ↓
+                        </button>
+                      </>
+                    )}
+                    {canCancel(it) && (
+                      <button
+                        type="button"
+                        className="icon-button secondary"
+                        onClick={() => cancel(it)}
+                        aria-label={`Remove ${it.job_title ?? it.file} from queue`}
+                      >
+                        <Icon name="close" size={16} />
+                      </button>
+                    )}
                   </li>
                 ))}
               </ol>

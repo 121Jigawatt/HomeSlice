@@ -1,5 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { api, LivePrinter } from "./api";
+import { useMe } from "./auth";
 import { Icon, IconName } from "./icons";
 import { useToast } from "./toast";
 import { useConfirm } from "./ui";
@@ -10,11 +11,12 @@ type LiveState = { printers: LivePrinter[] | null; error: string | null; refresh
 const PrinterContext = createContext<LiveState>({ printers: null, error: null, refresh: () => undefined });
 
 /** One shared poll for the whole app; paused while the tab is hidden. */
-export function PrinterProvider({ children }: { children: ReactNode }) {
+export function PrinterProvider({ children, enabled = true }: { children: ReactNode; enabled?: boolean }) {
   const [state, setState] = useState<Omit<LiveState, "refresh">>({ printers: null, error: null });
   const refreshRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
+    if (!enabled) return;
     let timer: number | undefined;
     let stopped = false;
     const tick = async () => {
@@ -45,7 +47,7 @@ export function PrinterProvider({ children }: { children: ReactNode }) {
       window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, []);
+  }, [enabled]);
 
   return (
     <PrinterContext.Provider value={{ ...state, refresh: () => refreshRef.current() }}>{children}</PrinterContext.Provider>
@@ -57,6 +59,7 @@ export function BedFlag({ p }: { p: LivePrinter }) {
   const { refresh } = useLivePrinters();
   const confirm = useConfirm();
   const notify = useToast();
+  const me = useMe();
   if (!p.needs_attention) return null;
   async function clear() {
     const ok = await confirm({
@@ -78,9 +81,11 @@ export function BedFlag({ p }: { p: LivePrinter }) {
       <span className="grow">
         <Icon name="error" size={14} /> <b>Needs attention.</b> {p.attention_reason}
       </span>
-      <button type="button" className="small secondary" onClick={clear}>
-        Bed is clear
-      </button>
+      {me.can("printers.print") && (
+        <button type="button" className="small secondary" onClick={clear}>
+          Bed is clear
+        </button>
+      )}
     </div>
   );
 }

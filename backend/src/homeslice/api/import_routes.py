@@ -5,9 +5,10 @@ from ..auth import Session
 from ..importer.sources import ModelImportError
 from ..library.service import TooLarge
 from ..library.validation import ValidationError
-from .deps import client_ip, require_session
+from .deps import client_ip, require
 
 router = APIRouter(prefix="/api/import", tags=["import"])
+upload = require("library.upload")
 
 
 class PreviewBody(BaseModel):
@@ -21,7 +22,7 @@ class ImportBody(BaseModel):
 
 
 @router.post("/preview")
-async def preview(body: PreviewBody, request: Request, _: Session = Depends(require_session)) -> dict:
+async def preview(body: PreviewBody, request: Request, _: Session = Depends(upload)) -> dict:
     try:
         return await request.app.state.services.importer.preview(body.url)
     except ModelImportError as e:
@@ -29,7 +30,7 @@ async def preview(body: PreviewBody, request: Request, _: Session = Depends(requ
 
 
 @router.post("", status_code=201)
-async def import_files(body: ImportBody, request: Request, session: Session = Depends(require_session)) -> list[dict]:
+async def import_files(body: ImportBody, request: Request, session: Session = Depends(upload)) -> list[dict]:
     services = request.app.state.services
     try:
         records = await services.importer.import_printables(body.model_id, body.file_ids, owner=session.username)

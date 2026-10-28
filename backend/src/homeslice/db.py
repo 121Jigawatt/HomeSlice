@@ -72,6 +72,19 @@ CREATE TABLE IF NOT EXISTS print_queue(
     sent_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_print_queue ON print_queue(printer_id, status, position);
+CREATE TABLE IF NOT EXISTS roles(
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    description TEXT NOT NULL DEFAULT '',
+    permissions TEXT NOT NULL,
+    builtin INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_roles(
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY(user_id, role_id)
+);
 """
 
 # Columns added after a table first shipped: (table, column, type).
@@ -94,6 +107,10 @@ ADDED_COLUMNS = [
     ("printers", "default_filaments", "TEXT"),
     ("printers", "default_bed_type", "TEXT"),
     ("printers", "bed_coverage", "INTEGER NOT NULL DEFAULT 50"),
+    ("users", "disabled", "INTEGER NOT NULL DEFAULT 0"),
+    # Set when an admin creates the account or resets its password; cleared once the user picks their own.
+    ("users", "must_change_password", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "last_login", "REAL"),
 ]
 
 

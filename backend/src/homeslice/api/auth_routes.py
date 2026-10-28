@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from ..auth import AuthError, RateLimited, Session
-from .deps import SESSION_COOKIE, check_origin, client_ip, require_session
+from .deps import SESSION_COOKIE, check_origin, client_ip, require, require_account
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -32,6 +32,8 @@ def status(request: Request) -> dict:
         "authenticated": session is not None,
         "username": session.username if session else None,
         "csrf_token": session.csrf_token if session else None,
+        "permissions": sorted(session.permissions) if session else [],
+        "must_change_password": session.must_change_password if session else False,
     }
 
 
@@ -72,13 +74,13 @@ def login(body: LoginBody, request: Request, response: Response) -> dict:
 
 
 @router.post("/logout", status_code=204)
-def logout(request: Request, response: Response, session: Session = Depends(require_session)) -> None:
+def logout(request: Request, response: Response, session: Session = Depends(require_account)) -> None:
     request.app.state.services.auth.logout(session)
     response.delete_cookie(SESSION_COOKIE, path="/")
 
 
 @router.post("/password", status_code=204)
-def change_password(body: PasswordBody, request: Request, session: Session = Depends(require_session)) -> None:
+def change_password(body: PasswordBody, request: Request, session: Session = Depends(require_account)) -> None:
     services = request.app.state.services
     try:
         services.auth.change_password(session, body.current_password, body.new_password)
@@ -88,5 +90,5 @@ def change_password(body: PasswordBody, request: Request, session: Session = Dep
 
 
 @router.get("/verify", status_code=204)
-def verify(_: Session = Depends(require_session)) -> None:
+def verify(_: Session = Depends(require("orca.desktop"))) -> None:
     """Used by the bundled nginx (auth_request) to gate the streamed desktop GUI."""

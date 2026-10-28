@@ -1,18 +1,22 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ActivityItem, api, OrcaStatus, Printer, PrinterStatus } from "../api";
+import { useMe } from "../auth";
 import { useToast } from "../toast";
 import { OverflowMenu, useConfirm, useUndoableDelete } from "../ui";
 import { PrinterProfiles } from "../printerProfiles";
 import { displayName } from "../presetNames";
+import { UsersAndRoles } from "./Users";
 
 export default function SettingsPage({ username, onLogout }: { username: string; onLogout: () => void }) {
+  const me = useMe();
   return (
     <section className="stack">
       <h1>Settings</h1>
-      <Printers />
-      <OrcaVersions />
-      <JobCleanup />
-      <ActivityLog />
+      {me.can("users.manage") && <UsersAndRoles />}
+      {me.can("printers.manage") && <Printers />}
+      {me.can("orca.manage") && <OrcaVersions />}
+      {me.can("jobs.manage_all") && <JobCleanup />}
+      {me.can("activity.view") && <ActivityLog />}
       <PasswordForm />
       <div className="card row between">
         <span>
@@ -351,6 +355,15 @@ const ACTIONS: Record<string, string> = {
   orca_install: "Installed an OrcaSlicer update",
   orca_activate: "Switched OrcaSlicer version",
   orca_rollback: "Rolled back OrcaSlicer",
+  user_create: "Added a user",
+  user_update: "Changed a user",
+  user_password_reset: "Reset a user's password",
+  user_delete: "Deleted a user",
+  role_create: "Created a role",
+  role_update: "Changed a role",
+  role_delete: "Deleted a role",
+  slice_reslice: "Re-sliced for another printer",
+  printer_profiles: "Set a printer's profiles",
 };
 
 function ActivityLog() {

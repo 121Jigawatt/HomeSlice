@@ -1,6 +1,7 @@
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, formatBytes, ImportPreview, Model, uploadModel } from "../api";
+import { useMe } from "../auth";
 import { Icon } from "../icons";
 import { ModelThumb } from "../ModelThumb";
 import { GettingStarted } from "../setup";
@@ -34,7 +35,9 @@ export default function LibraryPage() {
   const [sort, setSort] = useState<Sort>(() => (localStorage.getItem("library.sort") as Sort) || "newest");
   const fileInput = useRef<HTMLInputElement>(null);
   const notify = useToast();
-
+  const me = useMe();
+  const canUpload = me.can("library.upload");
+  const canDelete = (m: Model) => me.can("library.delete") || (canUpload && me.owns(m.owner));
   const load = () => api<Model[]>("/api/library").then(setModels).catch((e) => setError(e.message));
   useEffect(() => {
     load();
@@ -88,7 +91,7 @@ export default function LibraryPage() {
 
   const dropHandlers = {
     onDragOver: (e: DragEvent) => {
-      if (!e.dataTransfer.types.includes("Files")) return;
+      if (!canUpload || !e.dataTransfer.types.includes("Files")) return;
       e.preventDefault();
       setDragging(true);
     },
@@ -96,7 +99,7 @@ export default function LibraryPage() {
       if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
     },
     onDrop: (e: DragEvent) => {
-      if (!e.dataTransfer.files.length) return;
+      if (!canUpload || !e.dataTransfer.files.length) return;
       e.preventDefault();
       setDragging(false);
       uploadFiles(Array.from(e.dataTransfer.files));
@@ -127,9 +130,11 @@ export default function LibraryPage() {
     <section className={`stack drop-target${dragging ? " dragging" : ""}`} {...dropHandlers}>
       <div className="row between">
         <h1>Library</h1>
-        <button type="button" onClick={() => fileInput.current?.click()} disabled={busy}>
-          <Icon name="upload" size={18} /> Upload
-        </button>
+        {canUpload && (
+          <button type="button" onClick={() => fileInput.current?.click()} disabled={busy}>
+            <Icon name="upload" size={18} /> Upload
+          </button>
+        )}
         <input
           ref={fileInput}
           type="file"
@@ -140,7 +145,7 @@ export default function LibraryPage() {
           aria-label="Choose model files to upload"
         />
       </div>
-      <GettingStarted modelCount={models ? models.length : null} />
+      {me.can("printers.manage", "orca.manage") && <GettingStarted modelCount={models ? models.length : null} />}
       {dragging && (
         <div className="drop-overlay" aria-hidden="true">
           <Icon name="upload" size={32} />
@@ -179,19 +184,25 @@ export default function LibraryPage() {
           </ul>
         </div>
       )}
-      <ImportFromLink onImported={load} />
+      {canUpload && <ImportFromLink onImported={load} />}
       {error && <p className="error">{error}</p>}
       {models && models.length === 0 && uploads.length === 0 && (
         <div className="card empty">
           <Icon name="cube" size={40} />
           <h2>Your library is empty</h2>
-          <p className="muted">
-            Add STL, 3MF, OBJ or STEP files to slice them for your printers. Drag files onto this page, choose them from
-            your device, or paste a Printables or MakerWorld link above.
-          </p>
-          <button type="button" onClick={() => fileInput.current?.click()}>
-            <Icon name="upload" size={18} /> Choose files
-          </button>
+          {canUpload ? (
+            <>
+              <p className="muted">
+                Add STL, 3MF, OBJ or STEP files to slice them for your printers. Drag files onto this page, choose them
+                from your device, or paste a Printables or MakerWorld link above.
+              </p>
+              <button type="button" onClick={() => fileInput.current?.click()}>
+                <Icon name="upload" size={18} /> Choose files
+              </button>
+            </>
+          ) : (
+            <p className="muted">Models other people add will show up here.</p>
+          )}
         </div>
       )}
       {models && models.length > 1 && (
@@ -225,17 +236,22 @@ export default function LibraryPage() {
               <div className="title">{m.filename}</div>
               <div className="muted small">
                 {m.ext.slice(1).toUpperCase()} · {formatBytes(m.size)} · {new Date(m.created_at * 1000).toLocaleString()}
+                {m.owner && !me.owns(m.owner) && ` · added by ${m.owner}`}
               </div>
             </div>
             <div className="row">
-              <Link className="button small" to={`/slice?model=${m.id}`}>
-                Slice
-              </Link>
+              {me.can("slice.run") && (
+                <Link className="button small" to={`/slice?model=${m.id}`}>
+                  Slice
+                </Link>
+              )}
               <OverflowMenu
                 label={`More actions for ${m.filename}`}
                 items={[
                   { label: "Download", icon: "download", href: `/api/library/${m.id}/file`, download: true },
-                  { label: "Delete…", icon: "trash", danger: true, onSelect: () => remove(m) },
+                  ...(canDelete(m)
+                    ? [{ label: "Delete…", icon: "trash" as const, danger: true, onSelect: () => remove(m) }]
+                    : []),
                 ]}
               />
             </div>

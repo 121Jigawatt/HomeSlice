@@ -290,6 +290,22 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .job-row.selected { border-color: var(--accent); }
 .form-grid { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
 .form-grid > legend { grid-column: 1 / -1; }
+.row.nowrap { flex-wrap: nowrap; }
+.sub-card { border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem; background: rgba(255, 255, 255, 0.02); }
+.user-row { border-bottom: 1px solid var(--border); padding-bottom: 0.6rem; }
+.user-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.user-avatar {
+  flex: 0 0 2.2rem; height: 2.2rem; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(20, 184, 166, 0.18); color: var(--accent); font-weight: 700;
+}
+.role-badges { gap: 0.3rem; margin: 0.2rem 0; }
+.role-picker, .perm-group { border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem 0.6rem 0.5rem; display: flex; flex-direction: column; gap: 0.1rem; }
+.role-option, .perm-option { align-items: flex-start; gap: 0.6rem; padding: 0.35rem 0; min-height: 0; }
+.role-option input, .perm-option input { margin-top: 0.15rem; flex: 0 0 auto; }
+.perm-summary { color: var(--muted); overflow-wrap: anywhere; margin-top: 0.2rem; }
+/* .small also pads buttons; text in these lists shouldn't be. */
+:is(.user-row, .sub-card) :is(div, span, p, legend).small, p.users-intro { padding: 0; margin: 0; }
+.user-row .badge.small { padding: 0.2rem 0.55rem; }
 
 /* Tablet: wider column, model grid, two-column forms. Phones below 640px keep the layout above. */
 @media (min-width: 640px) {

@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import logging
-import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -13,10 +12,10 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from .config import Settings
 from .crypto import write_private_file
 from .db import Database
+from .rbac import ADMIN_ROLE, USERNAME_RE, Rbac, ensure_builtin_roles, permissions_for
 
 log = logging.getLogger(__name__)
 
-USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 MAX_PASSWORD_LENGTH = 256
 
 
@@ -34,6 +33,11 @@ class Session:
     username: str
     csrf_token: str
     token_hash: str
+    permissions: frozenset[str] = frozenset()
+    must_change_password: bool = False
+
+    def can(self, permission: str) -> bool:
+        return permission in self.permissions
 
 
 def _hash_token(token: str) -> str:
@@ -47,6 +51,8 @@ class AuthService:
         self._ph = PasswordHasher()
         # Verified against when the user doesn't exist, so timing doesn't reveal valid usernames.
         self._dummy_hash = self._ph.hash(secrets.token_urlsafe(16))
+        ensure_builtin_roles(db)
+        self.rbac = Rbac(db, self._ph, self.validate_password)
 
     @property
     def _setup_token_file(self) -> Path:
@@ -85,9 +91,12 @@ class AuthService:
         with self._db.tx() as conn:
             if conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
                 raise AuthError("Setup is already complete")
-            conn.execute(
+            user_id = conn.execute(
                 "INSERT INTO users(username, password_hash, created_at) VALUES(?, ?, ?)",
                 (username, pw_hash, time.time()),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO user_roles(user_id, role_id) SELECT ?, id FROM roles WHERE name=?", (user_id, ADMIN_ROLE)
             )
         self._setup_token_file.unlink(missing_ok=True)
 
@@ -109,7 +118,9 @@ class AuthService:
         if self._is_locked(keys, now):
             raise RateLimited("Too many failed attempts. Try again later.")
 
-        row = self._db.one("SELECT id, username, password_hash FROM users WHERE username=?", (username,))
+        row = self._db.one(
+            "SELECT id, username, password_hash, disabled, must_change_password FROM users WHERE username=?", (username,)
+        )
         ok = False
         if len(password) <= MAX_PASSWORD_LENGTH:
             try:
@@ -122,11 +133,14 @@ class AuthService:
             raise AuthError("Invalid username or password")
 
         self._db.execute("DELETE FROM login_failures WHERE key=?", (keys[1],))
+        if row["disabled"]:
+            raise AuthError("This account is disabled. Ask an administrator to turn it back on.")
         if self._ph.check_needs_rehash(row["password_hash"]):
             self._db.execute("UPDATE users SET password_hash=? WHERE id=?", (self._ph.hash(password), row["id"]))
-        return self._create_session(row["id"], row["username"], now)
+        self._db.execute("UPDATE users SET last_login=? WHERE id=?", (now, row["id"]))
+        return self._create_session(row["id"], row["username"], bool(row["must_change_password"]), now)
 
-    def _create_session(self, user_id: int, username: str, now: float) -> tuple[str, Session]:
+    def _create_session(self, user_id: int, username: str, must_change: bool, now: float) -> tuple[str, Session]:
         token = secrets.token_urlsafe(32)
         csrf = secrets.token_urlsafe(32)
         token_hash = _hash_token(token)
@@ -135,7 +149,7 @@ class AuthService:
             "VALUES(?, ?, ?, ?, ?, ?)",
             (token_hash, user_id, csrf, now, now + self._settings.session_ttl_hours * 3600, now),
         )
-        return token, Session(user_id, username, csrf, token_hash)
+        return token, Session(user_id, username, csrf, token_hash, permissions_for(self._db, user_id), must_change)
 
     def get_session(self, token: str | None) -> Session | None:
         if not token or len(token) > 128:
@@ -143,19 +157,26 @@ class AuthService:
         now = time.time()
         token_hash = _hash_token(token)
         row = self._db.one(
-            "SELECT s.user_id, s.csrf_token, s.expires_at, s.last_seen, u.username "
+            "SELECT s.user_id, s.csrf_token, s.expires_at, s.last_seen, u.username, u.disabled, u.must_change_password "
             "FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash=?",
             (token_hash,),
         )
         if row is None:
             return None
         idle_limit = self._settings.session_idle_hours * 3600
-        if row["expires_at"] < now or now - row["last_seen"] > idle_limit:
+        if row["disabled"] or row["expires_at"] < now or now - row["last_seen"] > idle_limit:
             self._db.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
             return None
         if now - row["last_seen"] > 60:
             self._db.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (now, token_hash))
-        return Session(row["user_id"], row["username"], row["csrf_token"], token_hash)
+        return Session(
+            row["user_id"],
+            row["username"],
+            row["csrf_token"],
+            token_hash,
+            permissions_for(self._db, row["user_id"]),
+            bool(row["must_change_password"]),
+        )
 
     def logout(self, session: Session) -> None:
         self._db.execute("DELETE FROM sessions WHERE token_hash=?", (session.token_hash,))
@@ -167,8 +188,13 @@ class AuthService:
         except (VerificationError, InvalidHashError):
             raise AuthError("Current password is incorrect") from None
         self.validate_password(new)
+        if session.must_change_password and hmac.compare_digest(old.encode(), new.encode()):
+            raise AuthError("Choose a new password, not the one you were given")
         with self._db.tx() as conn:
-            conn.execute("UPDATE users SET password_hash=? WHERE id=?", (self._ph.hash(new), session.user_id))
+            conn.execute(
+                "UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?",
+                (self._ph.hash(new), session.user_id),
+            )
             conn.execute(
                 "DELETE FROM sessions WHERE user_id=? AND token_hash<>?", (session.user_id, session.token_hash)
             )

@@ -369,8 +369,12 @@ class JobManager:
         q: str | None = None,
         statuses: list[str] | None = None,
         printer: str | None = None,
+        owner: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         where, args = [], []
+        if owner is not None:
+            where.append("owner = ? COLLATE NOCASE")
+            args.append(owner)
         if q:
             escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             where.append("title LIKE ? ESCAPE '\\'")
@@ -388,8 +392,9 @@ class JobManager:
         )
         return [j for r in rows if (j := self.get(r["id"]))], total
 
-    def printers_used(self) -> list[str]:
-        rows = self._db.all("SELECT DISTINCT json_extract(params, '$.printer') AS p FROM jobs ORDER BY p")
+    def printers_used(self, owner: str | None = None) -> list[str]:
+        where, args = ("WHERE owner = ? COLLATE NOCASE", (owner,)) if owner is not None else ("", ())
+        rows = self._db.all(f"SELECT DISTINCT json_extract(params, '$.printer') AS p FROM jobs {where} ORDER BY p", args)
         return [r["p"] for r in rows if r["p"]]
 
     def output_files(self, job_id: str) -> list[str]:

@@ -1,4 +1,3 @@
-import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -11,9 +10,10 @@ from ..orca.jobs import JobRequest
 from ..orca.profiles import KIND_DIRS, ProfileError
 from ..printers.moonraker import PrinterError
 from ..printers.service import DEFAULT_BED_COVERAGE
-from .deps import client_ip, require_session
+from .deps import client_ip, deny_unless, owns, require, require_session, visible_job
 
 router = APIRouter(prefix="/api", tags=["slicing"])
+slice_ = require("slice.run")
 
 
 class JobBody(BaseModel):
@@ -34,13 +34,6 @@ class JobBody(BaseModel):
     target_printer_id: str | None = Field(default=None, max_length=64)
     # Overrides the target printer's bed coverage for this slice.
     bed_coverage: int | None = Field(default=None, ge=10, le=100)
-
-
-def _job_id(job_id: str) -> str:
-    try:
-        return uuid.UUID(job_id).hex
-    except ValueError:
-        raise HTTPException(404, "Not found") from None
 
 
 @router.get("/profiles/{kind}")
@@ -124,7 +117,7 @@ def layer_heights(
 
 
 @router.post("/jobs", status_code=202)
-def create_job(body: JobBody, request: Request, session: Session = Depends(require_session)) -> dict:
+def create_job(body: JobBody, request: Request, session: Session = Depends(slice_)) -> dict:
     services = request.app.state.services
     coverage = DEFAULT_BED_COVERAGE
     if body.target_printer_id:
@@ -155,13 +148,11 @@ class ResliceBody(BaseModel):
 
 @router.post("/jobs/{job_id}/reslice", status_code=202)
 def reslice_for_printer(
-    job_id: str, body: ResliceBody, request: Request, session: Session = Depends(require_session)
+    job_id: str, body: ResliceBody, request: Request, session: Session = Depends(slice_)
 ) -> dict:
     """Re-slices a job for another physical printer: its profile and defaults, the job's models and overrides."""
     services = request.app.state.services
-    job = services.jobs.get(_job_id(job_id))
-    if job is None:
-        raise HTTPException(404, "Not found")
+    job = visible_job(request, session, job_id)
     try:
         printer = services.printers.get(body.printer_id)
     except PrinterError:
@@ -207,12 +198,15 @@ def list_jobs(
     printer: str | None = Query(default=None, max_length=200),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=30, ge=1, le=100),
-    _: Session = Depends(require_session),
+    session: Session = Depends(require_session),
 ) -> dict:
     statuses = [s for s in (status or "").split(",") if s in JOB_STATUSES] or None
     jobs = request.app.state.services.jobs
-    items, total = jobs.list(limit=limit, offset=offset, q=q or None, statuses=statuses, printer=printer or None)
-    return {"items": items, "total": total, "printers": jobs.printers_used()}
+    owner = None if session.can("jobs.view_all") else session.username
+    items, total = jobs.list(
+        limit=limit, offset=offset, q=q or None, statuses=statuses, printer=printer or None, owner=owner
+    )
+    return {"items": items, "total": total, "printers": jobs.printers_used(owner)}
 
 
 class CleanupBody(BaseModel):
@@ -221,7 +215,7 @@ class CleanupBody(BaseModel):
 
 
 @router.post("/jobs/cleanup")
-def cleanup_jobs(body: CleanupBody, request: Request, session: Session = Depends(require_session)) -> dict:
+def cleanup_jobs(body: CleanupBody, request: Request, session: Session = Depends(require("jobs.manage_all"))) -> dict:
     services = request.app.state.services
     statuses = ("done", "failed", "cancelled") if body.include_failed else ("done",)
     removed = services.jobs.cleanup(body.older_than_days, statuses)
@@ -230,10 +224,11 @@ def cleanup_jobs(body: CleanupBody, request: Request, session: Session = Depends
 
 
 @router.post("/jobs/{job_id}/retry", status_code=202)
-def retry_job(job_id: str, request: Request, session: Session = Depends(require_session)) -> dict:
+def retry_job(job_id: str, request: Request, session: Session = Depends(slice_)) -> dict:
     services = request.app.state.services
+    job = visible_job(request, session, job_id)
     try:
-        new_id = services.jobs.retry(_job_id(job_id), owner=session.username)
+        new_id = services.jobs.retry(job["id"], owner=session.username)
     except (SliceArgsError, ValueError) as e:
         raise HTTPException(400, str(e)) from None
     services.auth.audit(session.username, "slice_retry", f"{job_id} -> {new_id}", client_ip(request))
@@ -241,32 +236,38 @@ def retry_job(job_id: str, request: Request, session: Session = Depends(require_
 
 
 @router.get("/jobs/{job_id}")
-def get_job(job_id: str, request: Request, _: Session = Depends(require_session)) -> dict:
-    job = request.app.state.services.jobs.get(_job_id(job_id))
-    if job is None:
-        raise HTTPException(404, "Not found")
-    return job
+def get_job(job_id: str, request: Request, session: Session = Depends(require_session)) -> dict:
+    return visible_job(request, session, job_id)
 
 
 @router.get("/jobs/{job_id}/log", response_class=PlainTextResponse)
-def job_log(job_id: str, request: Request, _: Session = Depends(require_session)) -> str:
-    return request.app.state.services.jobs.log_tail(_job_id(job_id))
+def job_log(job_id: str, request: Request, session: Session = Depends(require_session)) -> str:
+    return request.app.state.services.jobs.log_tail(visible_job(request, session, job_id)["id"])
 
 
 @router.get("/jobs/{job_id}/files/{name}")
-def job_file(job_id: str, name: str, request: Request, _: Session = Depends(require_session)) -> FileResponse:
-    path = request.app.state.services.jobs.output_path(_job_id(job_id), name)
+def job_file(job_id: str, name: str, request: Request, session: Session = Depends(require_session)) -> FileResponse:
+    path = request.app.state.services.jobs.output_path(visible_job(request, session, job_id)["id"], name)
     if path is None:
         raise HTTPException(404, "Not found")
     return FileResponse(path, filename=name, media_type="application/octet-stream")
 
 
+def _manageable_job(request: Request, session: Session, job_id: str) -> dict:
+    job = visible_job(request, session, job_id)
+    if owns(session, job.get("owner")):
+        deny_unless(session, "slice.run", "jobs.manage_all")
+    else:
+        deny_unless(session, "jobs.manage_all")
+    return job
+
+
 @router.post("/jobs/{job_id}/cancel", status_code=204)
-def cancel_job(job_id: str, request: Request, _: Session = Depends(require_session)) -> None:
-    if not request.app.state.services.jobs.cancel(_job_id(job_id)):
+def cancel_job(job_id: str, request: Request, session: Session = Depends(require_session)) -> None:
+    if not request.app.state.services.jobs.cancel(_manageable_job(request, session, job_id)["id"]):
         raise HTTPException(409, "Job is not running")
 
 
 @router.delete("/jobs/{job_id}", status_code=204)
-def delete_job(job_id: str, request: Request, _: Session = Depends(require_session)) -> None:
-    request.app.state.services.jobs.delete(_job_id(job_id))
+def delete_job(job_id: str, request: Request, session: Session = Depends(require_session)) -> None:
+    request.app.state.services.jobs.delete(_manageable_job(request, session, job_id)["id"])

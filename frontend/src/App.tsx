@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, AuthStatus, setCsrfToken } from "./api";
-import { LoginPage, SetupPage } from "./pages/Auth";
+import { AuthContext, makeMe, Permission } from "./auth";
+import { ChangePasswordPage, LoginPage, SetupPage } from "./pages/Auth";
 import LibraryPage from "./pages/Library";
 import SlicePage from "./pages/Slice";
 import { JobPage, JobsPage } from "./pages/Jobs";
@@ -36,6 +37,7 @@ export default function App() {
     window.addEventListener("homeslice:unauthorized", onUnauthorized);
     return () => window.removeEventListener("homeslice:unauthorized", onUnauthorized);
   }, [refresh]);
+  const me = useMemo(() => (status ? makeMe(status) : null), [status]);
 
   if (error)
     return (
@@ -57,47 +59,55 @@ export default function App() {
         </div>
       </div>
     );
-  if (!status) return <div className="center muted">Loading…</div>;
+  if (!status || !me) return <div className="center muted">Loading…</div>;
   if (status.setup_required) return <SetupPage onDone={refresh} />;
   if (!status.authenticated) return <LoginPage onDone={refresh} />;
-  if (location.pathname === "/orca") return <FullOrca />;
+  if (status.must_change_password) return <ChangePasswordPage username={me.username} onDone={refresh} />;
+  if (location.pathname === "/orca" && me.can("orca.desktop")) return <FullOrca />;
+
+  const nav = NAV.filter(([, , , needs]) => !needs.length || me.can(...needs));
+  const home = nav[0]?.[0] ?? "/settings";
+  const allowed = (path: string) => nav.some(([to]) => to === path);
 
   return (
+    <AuthContext.Provider value={me}>
     <ToastProvider>
     <ConfirmProvider>
-    <PrinterProvider>
+    <PrinterProvider enabled={me.can("printers.view", "printers.manage", "printers.print")}>
     <JobWatcher />
     <a className="skip-link" href="#main">Skip to content</a>
     <div className="app">
       <header className="topbar">
         <span className="brand">HomeSlice</span>
-        <Link
-          className="button small secondary"
-          to="/orca"
-          title="Opens the complete OrcaSlicer desktop app in your browser, for editing presets and advanced plate work."
-        >
-          <Icon name="orca" size={16} />
-          <span>
-            <span className="wide-only">Advanced: </span>full OrcaSlicer
-          </span>
-        </Link>
+        {me.can("orca.desktop") && (
+          <Link
+            className="button small secondary"
+            to="/orca"
+            title="Opens the complete OrcaSlicer desktop app in your browser, for editing presets and advanced plate work."
+          >
+            <Icon name="orca" size={16} />
+            <span>
+              <span className="wide-only">Advanced: </span>full OrcaSlicer
+            </span>
+          </Link>
+        )}
       </header>
       <main className="content" id="main" tabIndex={-1}>
         <CertBanner />
         <Routes>
-          <Route path="/" element={<Navigate to="/library" replace />} />
-          <Route path="/login" element={<Navigate to="/library" replace />} />
-          <Route path="/library" element={<LibraryPage />} />
-          <Route path="/slice" element={<SlicePage />} />
+          <Route path="/" element={<Navigate to={home} replace />} />
+          <Route path="/login" element={<Navigate to={home} replace />} />
+          {allowed("/library") && <Route path="/library" element={<LibraryPage />} />}
+          {allowed("/slice") && <Route path="/slice" element={<SlicePage />} />}
           <Route path="/jobs" element={<JobsPage />} />
           <Route path="/jobs/:id" element={<JobSplit />} />
-          <Route path="/printers" element={<PrintersPage />} />
-          <Route path="/settings" element={<SettingsPage username={status.username ?? ""} onLogout={refresh} />} />
-          <Route path="*" element={<Navigate to="/library" replace />} />
+          {allowed("/printers") && <Route path="/printers" element={<PrintersPage />} />}
+          <Route path="/settings" element={<SettingsPage username={me.username} onLogout={refresh} />} />
+          <Route path="*" element={<Navigate to={home} replace />} />
         </Routes>
       </main>
-      <nav className="tabbar" aria-label="Main">
-        {NAV.map(([to, label, icon]) => (
+      <nav className="tabbar" aria-label="Main" style={{ gridTemplateColumns: `repeat(${nav.length}, 1fr)` }}>
+        {nav.map(([to, label, icon]) => (
           <NavLink key={to} to={to}>
             <span className="nav-icon">
               <Icon name={icon} size={22} />
@@ -110,15 +120,17 @@ export default function App() {
     </PrinterProvider>
     </ConfirmProvider>
     </ToastProvider>
+    </AuthContext.Provider>
   );
 }
 
-const NAV: [string, string, IconName][] = [
-  ["/library", "Library", "library"],
-  ["/slice", "Slice", "slice"],
-  ["/jobs", "Jobs", "jobs"],
-  ["/printers", "Printers", "printer"],
-  ["/settings", "Settings", "settings"],
+// Path, label, icon, and the permissions that show the tab (any of; none means everyone).
+const NAV: [string, string, IconName, Permission[]][] = [
+  ["/library", "Library", "library", ["library.view", "slice.run"]],
+  ["/slice", "Slice", "slice", ["slice.run"]],
+  ["/jobs", "Jobs", "jobs", []],
+  ["/printers", "Printers", "printer", ["printers.view", "printers.manage", "printers.print"]],
+  ["/settings", "Settings", "settings", []],
 ];
 
 /** On wide screens a job opens beside the list; on phones and tablets it takes the whole page. */

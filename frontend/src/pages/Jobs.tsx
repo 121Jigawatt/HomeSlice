@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, Job, JobPage as JobPageData, Printer } from "../api";
+import { useMe } from "../auth";
 import { Icon, IconName } from "../icons";
 import { ModelThumb } from "../ModelThumb";
 import { displayName } from "../presetNames";
@@ -87,6 +88,7 @@ export function JobsPage({ compact = false }: { compact?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [debouncedQ, setDebouncedQ] = useState("");
+  const me = useMe();
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQ(q.trim()), 250);
@@ -156,7 +158,7 @@ export function JobsPage({ compact = false }: { compact?: boolean }) {
   return (
     <section className="stack">
       {compact ? <h2>Jobs</h2> : <h1>Jobs</h1>}
-      {!compact && <PrintQueuePanel />}
+      {!compact && me.can("printers.view", "printers.print", "printers.manage") && <PrintQueuePanel />}
       <div className="card stack filters" role="search">
         <label>
           Search by model name
@@ -193,10 +195,12 @@ export function JobsPage({ compact = false }: { compact?: boolean }) {
             <p className="muted">No jobs match these filters.</p>
           ) : (
             <>
-              <p>No slicing jobs yet. Pick a model and printer settings to make your first one.</p>
-              <Link className="button" to="/slice">
-                Slice a model
-              </Link>
+              <p>No slicing jobs yet.{me.can("slice.run") && " Pick a model and printer settings to make your first one."}</p>
+              {me.can("slice.run") && (
+                <Link className="button" to="/slice">
+                  Slice a model
+                </Link>
+              )}
             </>
           )}
         </div>
@@ -223,7 +227,7 @@ export function JobsPage({ compact = false }: { compact?: boolean }) {
                   </div>
                   <StatusBadge status={j.status} />
                 </Link>
-                {!ACTIVE.has(j.status) && (
+                {!ACTIVE.has(j.status) && me.can("slice.run") && (
                   <Link className="button small secondary" to={`/slice?from=${j.id}`} aria-label={`Re-slice ${jobTitle(j)}`}>
                     Re-slice
                   </Link>
@@ -297,6 +301,7 @@ export function JobPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const me = useMe();
 
   useEffect(() => {
     let timer: number;
@@ -357,6 +362,8 @@ export function JobPage() {
   }
 
   const info = job.error_info;
+  const canSlice = me.can("slice.run");
+  const canManage = me.can("jobs.manage_all") || (canSlice && me.owns(job.owner));
   return (
     <section className="stack">
       <div className="row between">
@@ -386,7 +393,7 @@ export function JobPage() {
           )}
         </div>
       </div>
-      {job.status === "done" && <SendToPrinter job={job} />}
+      {job.status === "done" && me.can("printers.print") && <SendToPrinter job={job} canSlice={canSlice} />}
       {ACTIVE.has(job.status) && (
         <div className="card stack" aria-live="polite">
           <div className="row between">
@@ -398,9 +405,11 @@ export function JobPage() {
           <div className="progress-bar indeterminate" role="progressbar" aria-label="Slicing in progress">
             <span />
           </div>
-          <button className="small secondary" onClick={cancel}>
-            Cancel slice
-          </button>
+          {canManage && (
+            <button className="small secondary" onClick={cancel}>
+              Cancel slice
+            </button>
+          )}
         </div>
       )}
       {job.status === "failed" && info && (
@@ -414,12 +423,14 @@ export function JobPage() {
           <p className="small">
             <b>Try:</b> {info.fix}
           </p>
-          <div className="row">
-            <button onClick={retry}>Retry</button>
-            <Link className="button secondary" to={`/slice?from=${job.id}`}>
-              Edit settings and re-slice
-            </Link>
-          </div>
+          {canSlice && (
+            <div className="row">
+              <button onClick={retry}>Retry</button>
+              <Link className="button secondary" to={`/slice?from=${job.id}`}>
+                Edit settings and re-slice
+              </Link>
+            </div>
+          )}
           <details onToggle={(e) => setShowLog((e.target as HTMLDetailsElement).open)}>
             <summary>Technical details</summary>
             <p className="small muted">
@@ -433,9 +444,11 @@ export function JobPage() {
       {job.status === "cancelled" && (
         <div className="card row between">
           <span className="muted">This slice was cancelled.</span>
-          <button className="small" onClick={retry}>
-            Slice again
-          </button>
+          {canSlice && (
+            <button className="small" onClick={retry}>
+              Slice again
+            </button>
+          )}
         </div>
       )}
       {job.status === "done" && <GcodePreview job={job} />}
@@ -446,12 +459,12 @@ export function JobPage() {
         </details>
       )}
       <div className="row between">
-        {!ACTIVE.has(job.status) && (
+        {!ACTIVE.has(job.status) && canSlice && (
           <Link className="button small secondary" to={`/slice?from=${job.id}`}>
             Re-slice with these settings
           </Link>
         )}
-        {!ACTIVE.has(job.status) && (
+        {!ACTIVE.has(job.status) && canManage && (
           <OverflowMenu
             label={`More actions for this job`}
             items={[{ label: "Delete job…", icon: "trash", danger: true, onSelect: remove }]}
@@ -472,7 +485,7 @@ export function JobPage() {
   );
 }
 
-function SendToPrinter({ job }: { job: Job }) {
+function SendToPrinter({ job, canSlice }: { job: Job; canSlice: boolean }) {
   const notify = useToast();
   const confirm = useConfirm();
   const navigate = useNavigate();
@@ -633,7 +646,7 @@ function SendToPrinter({ job }: { job: Job }) {
             This job was sliced for the <b title={job.params.printer}>{displayName(job.params.printer)}</b> profile.
             {chosen ? ` ${chosen.name} uses ${displayName(chosen.printer_preset ?? "")}, so it needs its own slice.` : ""}
           </p>
-          {chosen && (
+          {chosen && canSlice && (
             <button type="button" onClick={reslice} disabled={busy}>
               {busy ? "Starting…" : `Re-slice for ${chosen.name}…`}
             </button>

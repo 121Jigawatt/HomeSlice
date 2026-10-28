@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from .api import auth_routes, import_routes, library_routes, orca_routes, printer_routes, slicing_routes
+from .api import auth_routes, import_routes, library_routes, orca_routes, printer_routes, slicing_routes, user_routes
 from .auth import AuthService
 from .config import Settings
 from .crypto import SecretBox
@@ -206,6 +206,7 @@ def create_app(settings: Settings | None = None, *, start_background: bool = Tru
         slicing_routes.router,
         printer_routes.router,
         orca_routes.router,
+        user_routes.router,
     ):
         app.include_router(router)
 

@@ -1,5 +1,4 @@
 import re
-import uuid
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
@@ -12,9 +11,13 @@ from ..library.validation import ValidationError
 from ..orca.profiles import ProfileError
 from ..printers.moonraker import PrinterBusy, PrinterError, PrinterMismatch
 from ..printers.queue import QueueError
-from .deps import client_ip, require_session
+from .deps import client_ip, deny_unless, owns, require, visible_job
 
 router = APIRouter(prefix="/api", tags=["printers"])
+# Printing needs printer status and the camera, to check the bed before starting.
+view = require("printers.view", "printers.manage", "printers.print")
+manage = require("printers.manage")
+print_ = require("printers.print")
 
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -51,12 +54,14 @@ def remote_name(services, job: dict, file: str) -> str:
 
 
 @router.get("/printers")
-def list_printers(request: Request, _: Session = Depends(require_session)) -> list[dict]:
+def list_printers(
+    request: Request, _: Session = Depends(require("printers.view", "printers.manage", "printers.print", "slice.run"))
+) -> list[dict]:
     return request.app.state.services.printers.list()
 
 
 @router.get("/printers/live")
-async def printers_live(request: Request, _: Session = Depends(require_session)) -> list[dict]:
+async def printers_live(request: Request, _: Session = Depends(view)) -> list[dict]:
     return await request.app.state.services.printers.live()
 
 
@@ -66,7 +71,7 @@ async def printer_webcam(
     index: int,
     request: Request,
     snapshot: bool = False,
-    _: Session = Depends(require_session),
+    _: Session = Depends(view),
 ) -> StreamingResponse:
     """Relays the printer's own webcam so it can be shown on the HTTPS page."""
     printers = request.app.state.services.printers
@@ -96,13 +101,13 @@ async def printer_webcam(
 
 
 @router.get("/printers/settings")
-def get_printer_settings(request: Request, _: Session = Depends(require_session)) -> dict:
+def get_printer_settings(request: Request, _: Session = Depends(manage)) -> dict:
     return {"scan_subnet": request.app.state.services.printers.scan_subnet()}
 
 
 @router.put("/printers/settings")
 def put_printer_settings(
-    body: PrinterSettingsBody, request: Request, session: Session = Depends(require_session)
+    body: PrinterSettingsBody, request: Request, session: Session = Depends(manage)
 ) -> dict:
     services = request.app.state.services
     try:
@@ -114,7 +119,7 @@ def put_printer_settings(
 
 
 @router.post("/printers", status_code=201)
-def add_printer(body: PrinterBody, request: Request, session: Session = Depends(require_session)) -> dict:
+def add_printer(body: PrinterBody, request: Request, session: Session = Depends(manage)) -> dict:
     services = request.app.state.services
     try:
         printer = services.printers.add(body.name, body.url, body.api_key)
@@ -125,7 +130,7 @@ def add_printer(body: PrinterBody, request: Request, session: Session = Depends(
 
 
 @router.delete("/printers/{printer_id}", status_code=204)
-def delete_printer(printer_id: str, request: Request, session: Session = Depends(require_session)) -> None:
+def delete_printer(printer_id: str, request: Request, session: Session = Depends(manage)) -> None:
     services = request.app.state.services
     try:
         deleted = services.printers.delete(printer_id)
@@ -137,7 +142,7 @@ def delete_printer(printer_id: str, request: Request, session: Session = Depends
 
 
 @router.get("/printers/{printer_id}/status")
-async def printer_status(printer_id: str, request: Request, _: Session = Depends(require_session)) -> dict:
+async def printer_status(printer_id: str, request: Request, _: Session = Depends(view)) -> dict:
     printers = request.app.state.services.printers
     try:
         if printers.get(printer_id) is None:
@@ -150,15 +155,10 @@ async def printer_status(printer_id: str, request: Request, _: Session = Depends
 
 
 @router.post("/jobs/{job_id}/send")
-async def send_job(job_id: str, body: SendBody, request: Request, session: Session = Depends(require_session)) -> dict:
+async def send_job(job_id: str, body: SendBody, request: Request, session: Session = Depends(print_)) -> dict:
     services = request.app.state.services
-    try:
-        job_id = uuid.UUID(job_id).hex
-    except ValueError:
-        raise HTTPException(404, "Not found") from None
-    job = services.jobs.get(job_id)
-    if job is None:
-        raise HTTPException(404, "Not found")
+    job = visible_job(request, session, job_id)
+    job_id = job["id"]
     if job["status"] != "done":
         raise HTTPException(409, "Only finished jobs can be sent")
     path = services.jobs.output_path(job_id, body.file) if body.file.endswith(".gcode") else None
@@ -204,7 +204,7 @@ class ProfilesBody(BaseModel):
 
 @router.put("/printers/{printer_id}/profiles")
 def set_printer_profiles(
-    printer_id: str, body: ProfilesBody, request: Request, session: Session = Depends(require_session)
+    printer_id: str, body: ProfilesBody, request: Request, session: Session = Depends(manage)
 ) -> dict:
     """Links a physical printer to the OrcaSlicer profile it prints, plus defaults for the Slice page."""
     services = request.app.state.services
@@ -241,7 +241,7 @@ def set_printer_profiles(
 
 @router.put("/printers/{printer_id}/attention")
 def set_attention(
-    printer_id: str, body: AttentionBody, request: Request, session: Session = Depends(require_session)
+    printer_id: str, body: AttentionBody, request: Request, session: Session = Depends(print_)
 ) -> dict:
     services = request.app.state.services
     try:
@@ -269,19 +269,16 @@ class ReorderBody(BaseModel):
 
 
 @router.get("/queue")
-def list_queue(request: Request, _: Session = Depends(require_session)) -> list[dict]:
+def list_queue(request: Request, _: Session = Depends(view)) -> list[dict]:
     return request.app.state.services.queue.list()
 
 
 @router.post("/queue", status_code=201)
-def add_to_queue(body: QueueBody, request: Request, session: Session = Depends(require_session)) -> dict:
+def add_to_queue(body: QueueBody, request: Request, session: Session = Depends(print_)) -> dict:
     services = request.app.state.services
-    try:
-        job_id = uuid.UUID(body.job_id).hex
-    except ValueError:
-        raise HTTPException(404, "Not found") from None
-    job = services.jobs.get(job_id)
-    if job is None or job["status"] != "done":
+    job = visible_job(request, session, body.job_id)
+    job_id = job["id"]
+    if job["status"] != "done":
         raise HTTPException(409, "Only finished jobs can be queued")
     try:
         target = services.printers.get(body.printer_id)
@@ -304,7 +301,7 @@ def add_to_queue(body: QueueBody, request: Request, session: Session = Depends(r
 
 
 @router.put("/queue/order", status_code=204)
-def reorder_queue(body: ReorderBody, request: Request, _: Session = Depends(require_session)) -> None:
+def reorder_queue(body: ReorderBody, request: Request, _: Session = Depends(require("printers.queue"))) -> None:
     try:
         request.app.state.services.queue.reorder(body.printer_id, body.ids)
     except (QueueError, PrinterError) as e:
@@ -312,8 +309,15 @@ def reorder_queue(body: ReorderBody, request: Request, _: Session = Depends(requ
 
 
 @router.delete("/queue/{item_id}", status_code=204)
-def cancel_queued(item_id: str, request: Request, session: Session = Depends(require_session)) -> None:
+def cancel_queued(
+    item_id: str, request: Request, session: Session = Depends(require("printers.print", "printers.queue"))
+) -> None:
     services = request.app.state.services
+    item = next((i for i in services.queue.list() if i["id"] == item_id), None)
+    if item is None:
+        raise HTTPException(404, "Not waiting in the queue")
+    if not owns(session, item["owner"]):
+        deny_unless(session, "printers.queue")
     try:
         cancelled = services.queue.cancel(item_id)
     except QueueError:
@@ -328,7 +332,7 @@ def activity(
     request: Request,
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    _: Session = Depends(require_session),
+    _: Session = Depends(require("activity.view")),
 ) -> dict:
     db = request.app.state.services.db
     rows = db.all(

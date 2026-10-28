@@ -19,7 +19,10 @@ type IconName =
   | "printer"
   | "menu"
   | "upload"
-  | "orca";
+  | "orca"
+  | "user"
+  | "key"
+  | "edit";
 
 // 24x24 outline paths (stroke icons) kept inline so the PWA shell needs no icon font.
 const PATHS: Record<IconName, string> = {
@@ -44,6 +47,9 @@ const PATHS: Record<IconName, string> = {
   menu: "M3 6h18M3 12h18M3 18h18",
   upload: "M12 21V9M7 14l5-5 5 5M5 3h14",
   orca: "M3 5h18v12H3zM8 21h8M12 17v4",
+  user: "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z",
+  key: "M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4",
+  edit: "M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z",
 };
 
 export function Icon({ name, size = 18, label }: { name: IconName; size?: number; label?: string }) {

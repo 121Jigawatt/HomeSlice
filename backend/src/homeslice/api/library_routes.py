@@ -8,13 +8,15 @@ from ..library.service import TooLarge
 from ..library.step import StepError
 from ..library.thumbnails import ThumbnailError
 from ..library.validation import ValidationError
-from .deps import client_ip, require_session
+from .deps import client_ip, deny_unless, require, require_session
 
 router = APIRouter(prefix="/api/library", tags=["library"])
+# Slicing needs to see the models it slices, even for someone who can't browse the library page.
+browse = require("library.view", "slice.run")
 
 
 @router.get("")
-def list_models(request: Request, _: Session = Depends(require_session)) -> list[dict]:
+def list_models(request: Request, _: Session = Depends(browse)) -> list[dict]:
     return request.app.state.services.library.list()
 
 
@@ -22,7 +24,7 @@ def list_models(request: Request, _: Session = Depends(require_session)) -> list
 async def upload_model(
     request: Request,
     filename: str = Query(min_length=1, max_length=255),
-    session: Session = Depends(require_session),
+    session: Session = Depends(require("library.upload")),
 ) -> dict:
     """Raw-body upload (application/octet-stream) so size limits apply while streaming."""
     services = request.app.state.services
@@ -40,7 +42,7 @@ async def upload_model(
 
 
 @router.get("/{model_id}/file")
-def download_model(model_id: str, request: Request, _: Session = Depends(require_session)) -> FileResponse:
+def download_model(model_id: str, request: Request, _: Session = Depends(browse)) -> FileResponse:
     library = request.app.state.services.library
     try:
         record = library.get(model_id)
@@ -58,7 +60,7 @@ async def model_mesh(
     request: Request,
     plate: int = Query(0, ge=0, le=999),
     item: int = Query(0, ge=0, le=500),
-    _: Session = Depends(require_session),
+    _: Session = Depends(browse),
 ) -> FileResponse:
     """The model as an STL the browser can draw: STEP converted, 3MF flattened per plate or one object (item)."""
     library = request.app.state.services.library
@@ -76,7 +78,7 @@ async def model_mesh(
 
 
 @router.get("/{model_id}/parts")
-async def model_parts(model_id: str, request: Request, _: Session = Depends(require_session)) -> list[dict]:
+async def model_parts(model_id: str, request: Request, _: Session = Depends(browse)) -> list[dict]:
     """Objects and footprints used to plan beds on the Slice page (3MF: one entry per object, with its plate)."""
     library = request.app.state.services.library
     try:
@@ -102,8 +104,16 @@ def model_thumbnail(model_id: str, request: Request, _: Session = Depends(requir
 
 
 @router.delete("/{model_id}", status_code=204)
-def delete_model(model_id: str, request: Request, session: Session = Depends(require_session)) -> None:
+def delete_model(model_id: str, request: Request, session: Session = Depends(require("library.upload", "library.delete"))) -> None:
     services = request.app.state.services
+    try:
+        record = services.library.get(model_id)
+    except ValidationError:
+        record = None
+    if record is None:
+        raise HTTPException(404, "Not found")
+    if (record.get("owner") or "").lower() != session.username.lower():
+        deny_unless(session, "library.delete")
     try:
         deleted = services.library.delete(model_id)
     except ValidationError:

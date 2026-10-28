@@ -75,6 +75,8 @@ export interface AuthStatus {
   authenticated: boolean;
   username: string | null;
   csrf_token: string | null;
+  permissions: string[];
+  must_change_password: boolean;
 }
 
 export interface Model {
@@ -85,6 +87,7 @@ export interface Model {
   created_at: number;
   source_url: string | null;
   license: string | null;
+  owner: string | null;
   has_thumbnail: boolean;
   // Saved plates of a 3MF project (Bambu Studio / OrcaSlicer).
   plates?: { index: number; name: string; objects: number }[];

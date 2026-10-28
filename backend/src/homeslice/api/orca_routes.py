@@ -8,10 +8,11 @@ from pydantic import BaseModel
 from ..auth import Session
 from ..orca.updater import CHANNELS, UpdateError
 from ..orca.versions import VersionError
-from .deps import client_ip, require_session
+from .deps import client_ip, require, require_session
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/orca", tags=["orca"])
+manage = require("orca.manage")
 
 
 class ChannelBody(BaseModel):
@@ -50,7 +51,7 @@ def orca_status(request: Request, _: Session = Depends(require_session)) -> dict
 
 
 @router.put("/settings", status_code=204)
-def update_settings(body: SettingsBody, request: Request, session: Session = Depends(require_session)) -> None:
+def update_settings(body: SettingsBody, request: Request, session: Session = Depends(manage)) -> None:
     if body.channel not in CHANNELS:
         raise HTTPException(400, "Unknown channel")
     s = request.app.state.services
@@ -60,7 +61,7 @@ def update_settings(body: SettingsBody, request: Request, session: Session = Dep
 
 
 @router.post("/check")
-async def check(body: ChannelBody, request: Request, _: Session = Depends(require_session)) -> dict:
+async def check(body: ChannelBody, request: Request, _: Session = Depends(manage)) -> dict:
     s = request.app.state.services
     channel = body.channel or get_channel(s)
     try:
@@ -83,7 +84,7 @@ async def run_install(services, channel: str) -> None:
 
 
 @router.post("/install", status_code=202)
-async def install(body: ChannelBody, request: Request, session: Session = Depends(require_session)) -> dict:
+async def install(body: ChannelBody, request: Request, session: Session = Depends(manage)) -> dict:
     s = request.app.state.services
     channel = body.channel or get_channel(s)
     if channel not in CHANNELS:
@@ -99,7 +100,7 @@ async def install(body: ChannelBody, request: Request, session: Session = Depend
 
 
 @router.post("/activate", status_code=204)
-def activate(body: ActivateBody, request: Request, session: Session = Depends(require_session)) -> None:
+def activate(body: ActivateBody, request: Request, session: Session = Depends(manage)) -> None:
     s = request.app.state.services
     try:
         s.versions.activate(body.version_id)
@@ -110,7 +111,7 @@ def activate(body: ActivateBody, request: Request, session: Session = Depends(re
 
 
 @router.post("/rollback")
-def rollback(request: Request, session: Session = Depends(require_session)) -> dict:
+def rollback(request: Request, session: Session = Depends(manage)) -> dict:
     s = request.app.state.services
     try:
         version = s.versions.rollback()
