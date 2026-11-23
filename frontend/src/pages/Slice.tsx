@@ -7,6 +7,7 @@ import { ModelPart, PlateChoice, planBeds, plateRequest, polygonArea } from "../
 import { BED_TYPES, bedLabel, displayName } from "../presetNames";
 import { formatDuration, IDLE_STATES, PrinterBadge, useLivePrinters } from "../printers";
 import { useToast } from "../toast";
+import { OverflowMenu } from "../ui";
 
 type Kind = "printer" | "process" | "filament";
 type Incompat = { process: Record<string, string>; filament: Record<string, string> };
@@ -326,6 +327,23 @@ export default function SlicePage() {
     filamentColors[index] || (painted ? palettes[painted.id][paintSlots.indexOf(index + 1)] : undefined)
       || presets.filament.find((preset) => preset.name === name)?.color || "#f2754e",
   ), [filaments, filamentColors, painted, palettes, paintSlots, presets.filament]);
+  function filamentMenu(label: string, value: number, setSlot: (slot: number) => void, allowClear = false) {
+    const choices = filaments.map((name, index) => ({
+      label: `${index + 1}: ${name ? spoolLabel(index) || displayName(name) : "Unconfigured"}`,
+      swatch: name ? slotColors[index] : undefined,
+      checked: value === index + 1,
+      disabled: !name,
+      onSelect: () => setSlot(index + 1),
+    }));
+    const current = choices[value - 1];
+    const text = current?.label ?? "Select a slot";
+    return <OverflowMenu label={`${label}: ${text}`} items={allowClear ? [
+      ...choices, { label: "Clear assignment", checked: value === 0, onSelect: () => setSlot(0) },
+    ] : choices} trigger={<>
+      {current?.swatch && <span aria-hidden="true" className="filament-chip" style={{ backgroundColor: current.swatch }} />}
+      <span className="filament-menu-value">{text}</span>
+    </>} />;
+  }
   const previewModels = useMemo(() => bed?.parts.map(({ model, item }) => {
     const index = (modelFilaments[model.id] ?? 1) - 1;
     return { ...model, item, color: !palettes[model.id]?.length && filaments[index] ? slotColors[index] : undefined };
@@ -490,34 +508,20 @@ export default function SlicePage() {
           renderFilament={(model) => model.id === painted?.id ? (
             <div className="filament-grid picked-palette" role="group" aria-label={`Filament mapping for ${model.filename}`}>
               {palette.map((color, index) => (
-                <label className="filament-map" key={index}>
+                <div className="filament-map" key={index}>
                   <span className="filament-source"><span aria-hidden="true" className="filament-chip" style={{ backgroundColor: color }} />{color}</span>
-                  <select aria-label={`Source color ${index + 1}: ${color}`} value={paintSlots[index] ?? 0} onChange={(event) => {
-                    const slot = Number(event.target.value);
+                  {filamentMenu(`Source color ${index + 1} ${color}`, paintSlots[index] ?? 0, (slot) => {
                     setPaintSlots((slots) => palette.map((_, position) => position === index ? slot : slots[position] ?? 0));
-                  }}>
-                    <option value={0}>Select a slot</option>
-                    {filaments.map((name, slot) => <option disabled={!name} key={slot} value={slot + 1}>
-                      {slot + 1}: {spoolLabel(slot) || displayName(name)}
-                    </option>)}
-                  </select>
-                </label>
+                  }, true)}
+                </div>
               ))}
             </div>
           ) : (filaments.length > 1 || usesModelSlots) && (
-            <label className="picked-filament">
-              <span className="muted filament-source">
-                {filaments[filamentOf(model.id) - 1] && <span aria-hidden="true" className="filament-chip" style={{ backgroundColor: slotColors[filamentOf(model.id) - 1] }} />}
-                Filament slot
-              </span>
-              <select aria-label={`Filament slot for ${model.filename}`} value={filamentOf(model.id)}
-                onChange={(event) => setModelFilaments((slots) => ({ ...slots, [model.id]: Number(event.target.value) }))}>
-                <option value={0} disabled>Select a slot</option>
-                {filaments.map((name, index) => <option key={index} value={index + 1} disabled={!name}>
-                  {index + 1}: {displayName(name)}
-                </option>)}
-              </select>
-            </label>
+            <div className="picked-filament">
+              <span className="muted">Filament slot</span>
+              {filamentMenu(`Filament slot for ${model.filename}`, filamentOf(model.id), (slot) =>
+                setModelFilaments((slots) => ({ ...slots, [model.id]: slot })))}
+            </div>
           )}
         />
         {selected.size > 0 && (

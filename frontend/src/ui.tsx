@@ -117,14 +117,19 @@ export interface MenuItem {
 }
 
 /** "…" overflow menu with arrow-key navigation; closes on Escape, selection or outside click. */
-export function OverflowMenu({ label, items }: { label: string; items: MenuItem[] }) {
+export function OverflowMenu({ label, items, trigger }: {
+  label: string;
+  items: (MenuItem & { swatch?: string; checked?: boolean; disabled?: boolean })[];
+  trigger?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    const first = root.current?.querySelector<HTMLElement>("[role=menuitem]");
+    const first = root.current?.querySelector<HTMLElement>('[aria-checked="true"]:not(:disabled)')
+      ?? root.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)');
     first?.focus();
     const onDown = (e: MouseEvent) => {
       if (!root.current?.contains(e.target as Node)) setOpen(false);
@@ -134,7 +139,7 @@ export function OverflowMenu({ label, items }: { label: string; items: MenuItem[
   }, [open]);
 
   const onKey = (e: React.KeyboardEvent) => {
-    const els = [...(root.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+    const els = [...(root.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? [])];
     const i = els.indexOf(document.activeElement as HTMLElement);
     if (e.key === "Escape") {
       setOpen(false);
@@ -144,22 +149,22 @@ export function OverflowMenu({ label, items }: { label: string; items: MenuItem[
       els[(i + 1) % els.length]?.focus();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      els[(i - 1 + els.length) % els.length]?.focus();
+      els[(i < 0 ? els.length - 1 : (i - 1 + els.length) % els.length)]?.focus();
     } else if (e.key === "Tab") setOpen(false);
   };
 
   return (
-    <div className="menu" ref={root} onKeyDown={onKey}>
+    <div className={trigger ? "menu filament-menu" : "menu"} ref={root} onKeyDown={onKey}>
       <button
         ref={button}
         type="button"
-        className="icon-button secondary"
+        className={trigger ? "filament-menu-trigger secondary" : "icon-button secondary"}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={label}
         onClick={() => setOpen(!open)}
       >
-        <Icon name="more" size={20} />
+        {trigger ?? <Icon name="more" size={20} />}
       </button>
       {open && (
         <div className="menu-list" role="menu" aria-label={label}>
@@ -180,15 +185,19 @@ export function OverflowMenu({ label, items }: { label: string; items: MenuItem[
               <button
                 key={it.label}
                 type="button"
-                role="menuitem"
+                role={it.checked === undefined ? "menuitem" : "menuitemradio"}
+                aria-checked={it.checked}
+                disabled={it.disabled}
                 tabIndex={-1}
                 className={it.danger ? "danger-text" : undefined}
                 onClick={() => {
                   setOpen(false);
                   it.onSelect?.();
+                  if (trigger) button.current?.focus();
                 }}
               >
-                {it.icon && <Icon name={it.icon} size={16} />} {it.label}
+                {it.swatch && <span aria-hidden="true" className="filament-chip" style={{ backgroundColor: it.swatch }} />}
+                {it.icon && <Icon name={it.icon} size={16} />} <span>{it.label}</span>
               </button>
             ),
           )}

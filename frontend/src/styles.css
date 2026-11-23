@@ -226,8 +226,14 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .bed-mode label.check { gap: 0.45rem; min-height: 40px; }
 .bed-mode input[type="radio"] { width: 1.1rem; height: 1.1rem; min-height: 0; accent-color: var(--accent); }
 .copies { display: flex; flex-direction: column; gap: 0.2rem; }
-.picked-filament { flex: 1 1 8rem; min-width: 0; gap: 0.2rem; font-size: 0.85rem; }
-.picked-filament select { min-width: 0; min-height: 44px; padding: 0.35rem; }
+.picked-filament { flex: 1 1 8rem; min-width: 0; display: grid; gap: 0.2rem; font-size: 0.85rem; }
+.filament-menu { min-width: 0; }
+.filament-menu-trigger { width: 100%; min-width: 0; justify-content: flex-start; padding: 0.35rem 0.5rem; background: var(--bg); color: var(--text); }
+.filament-menu-trigger::after { content: ""; flex: none; width: 0.35rem; height: 0.35rem; border: solid currentColor; border-width: 0 1px 1px 0; transform: rotate(45deg); margin-left: auto; }
+.filament-menu-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filament-menu .menu-list { width: max(100%, min(14rem, calc(100vw - 3rem))); max-height: 16rem; overflow-y: auto; }
+.filament-menu [role="menuitemradio"] { justify-content: flex-start; padding: 0.35rem 0.55rem; background: transparent; color: var(--text); text-align: left; font-weight: 500; overflow-wrap: anywhere; }
+.filament-menu [role="menuitemradio"]:is(:hover, :focus-visible, [aria-checked="true"]) { background: var(--border); }
 .picked-palette { flex: 1 1 100%; min-width: 0; }
 .quantity { display: inline-flex; align-items: center; gap: 0.25rem; flex: 0 0 auto; }
 .quantity input { width: 3.6rem; text-align: center; padding: 0.55rem 0.25rem; -moz-appearance: textfield; }
