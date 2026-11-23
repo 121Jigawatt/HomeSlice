@@ -96,6 +96,7 @@ export interface Model {
 }
 
 export interface Preset {
+  color?: string;
   name: string;
   kind: string;
   source: "user" | "system";

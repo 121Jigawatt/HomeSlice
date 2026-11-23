@@ -228,6 +228,7 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .copies { display: flex; flex-direction: column; gap: 0.2rem; }
 .picked-filament { flex: 1 1 8rem; min-width: 0; gap: 0.2rem; font-size: 0.85rem; }
 .picked-filament select { min-width: 0; min-height: 44px; padding: 0.35rem; }
+.picked-palette { flex: 1 1 100%; min-width: 0; }
 .quantity { display: inline-flex; align-items: center; gap: 0.25rem; flex: 0 0 auto; }
 .quantity input { width: 3.6rem; text-align: center; padding: 0.55rem 0.25rem; -moz-appearance: textfield; }
 .quantity input::-webkit-inner-spin-button, .quantity input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ class PresetRef:
     printer_variant: str | None = None
     # None = not set (inherit from parent); () = explicitly compatible with every printer.
     compatible_printers: tuple[str, ...] | None = None
+    filament_color: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,9 @@ class ProfileStore:
                 visible = source == "user" or str(data.get("instantiation", "true")).lower() == "true"
                 inherits = data.get("inherits") if isinstance(data.get("inherits"), str) else None
                 compat = data.get("compatible_printers")
+                color = data.get("filament_colour")
+                if isinstance(color, list):
+                    color = color[0] if color else None
                 index[key] = PresetRef(
                     name,
                     kind,
@@ -100,6 +105,8 @@ class ProfileStore:
                     _str_or_none(data.get("printer_model")),
                     _str_or_none(data.get("printer_variant")),
                     tuple(c for c in compat if isinstance(c, str)) if isinstance(compat, list) else None,
+                    (color.lower() if isinstance(color, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", color) else "#f2754e")
+                    if "filament_colour" in data else None,
                 )
 
     def _load_selections(self) -> Selections | None:
@@ -237,7 +244,8 @@ class ProfileStore:
             if k == kind and r.visible and (r.source == "user" or (include_system and system_enabled(r)))
         ]
         return [
-            {"name": r.name, "kind": r.kind, "source": r.source, "inherits": r.inherits}
+            {"name": r.name, "kind": r.kind, "source": r.source, "inherits": r.inherits,
+             **({"color": self._inherited(index, r, "filament_color") or "#f2754e"} if kind == "filament" else {})}
             for r in sorted(refs, key=lambda r: (r.source != "user", r.name.lower()))
         ]
 

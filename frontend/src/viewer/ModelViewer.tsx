@@ -16,7 +16,7 @@ interface Bed {
 }
 
 /** A model to draw; for a 3MF, `item` is one of its objects (each is laid out separately, as the slicer arranges). */
-export type PreviewModel = Model & { item?: number };
+export type PreviewModel = Model & { item?: number; color?: string };
 
 async function loadModel(m: PreviewModel): Promise<THREE.Object3D> {
   // STEP (CAD) and 3MF objects come from the server as STL; three.js' 3MF loader can't follow Bambu Studio's
@@ -30,7 +30,7 @@ async function loadModel(m: PreviewModel): Promise<THREE.Object3D> {
     throw new Error(detail || `Could not load ${m.filename}`);
   }
   const data = await res.arrayBuffer();
-  const material = new THREE.MeshStandardMaterial({ color: ACCENT, roughness: 0.6, metalness: 0.05 });
+  const material = new THREE.MeshStandardMaterial({ color: m.color ?? ACCENT, roughness: 0.6, metalness: 0.05 });
   if (m.ext === ".stl" || viaServer) {
     const geo = new STLLoader().parse(data);
     geo.computeVertexNormals();
@@ -132,7 +132,7 @@ export default function ModelViewer({ models, printerPreset }: { models: Preview
       // Copies share one download and geometry.
       const loads = new Map<string, Promise<THREE.Object3D>>();
       const load = (m: PreviewModel) => {
-        const key = `${m.id}:${m.item ?? 0}`;
+        const key = `${m.id}:${m.item ?? 0}:${m.color ?? ""}`;
         if (!loads.has(key)) loads.set(key, loadModel(m));
         return loads.get(key)!.then((o) => o.clone());
       };
@@ -172,6 +172,7 @@ export default function ModelViewer({ models, printerPreset }: { models: Preview
       root.traverse((o) => {
         const mesh = o as THREE.Mesh;
         mesh.geometry?.dispose?.();
+        if (mesh.material instanceof THREE.Material) mesh.material.dispose();
       });
       viewer.render();
     };

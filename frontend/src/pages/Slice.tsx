@@ -303,10 +303,6 @@ export default function SlicePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedModels, selected, partsByModel, bedArea, coverage, copies, plateChoices]);
   const bed = beds?.[Math.min(bedIndex, beds.length - 1)];
-  const previewModels = useMemo(
-    () => (bed ? bed.parts.map((p) => ({ ...p.model, item: p.item })) : []),
-    [bed],
-  );
   const sharedBeds = beds?.some((b) => b.projectPlate === undefined && b.parts.length > 0) ?? false;
   const totalObjects = beds ? beds.reduce((n, b) => n + b.parts.length, 0) : selectedModels.length;
   const chosenFilaments = filaments.filter(Boolean);
@@ -326,6 +322,13 @@ export default function SlicePage() {
   }, [selectedModels]);
   const usesModelSlots = [...selected].some((id) => modelFilaments[id] !== undefined);
   const filamentOf = (id: string) => modelFilaments[id] ?? 1;
+  const slotColors = useMemo(() => filaments.map((name, index) =>
+    filamentColors[index] || presets.filament.find((preset) => preset.name === name)?.color || "#f2754e",
+  ), [filaments, filamentColors, presets.filament]);
+  const previewModels = useMemo(() => bed?.parts.map(({ model, item }) => {
+    const index = (modelFilaments[model.id] ?? 1) - 1;
+    return { ...model, item, color: !palettes[model.id]?.length && filaments[index] ? slotColors[index] : undefined };
+  }) ?? [], [bed, filaments, modelFilaments, palettes, slotColors]);
 
   const blockers: string[] = [];
   if (selected.size === 0) blockers.push("Select at least one model.");
@@ -483,9 +486,29 @@ export default function SlicePage() {
           onCopies={(id, n) => setCopies((c) => ({ ...c, [id]: n }))}
           plateChoice={(m) => choiceOf(m)}
           onPlateChoice={(id, c) => setPlateChoices((cur) => ({ ...cur, [id]: c }))}
-          renderFilament={(model) => !painted && (filaments.length > 1 || usesModelSlots) && (
+          renderFilament={(model) => model.id === painted?.id ? (
+            <div className="filament-grid picked-palette" role="group" aria-label={`Filament mapping for ${model.filename}`}>
+              {palette.map((color, index) => (
+                <label className="filament-map" key={index}>
+                  <span className="filament-source"><span aria-hidden="true" className="filament-chip" style={{ backgroundColor: color }} />{color}</span>
+                  <select aria-label={`Source color ${index + 1}: ${color}`} value={paintSlots[index] ?? 0} onChange={(event) => {
+                    const slot = Number(event.target.value);
+                    setPaintSlots((slots) => palette.map((_, position) => position === index ? slot : slots[position] ?? 0));
+                  }}>
+                    <option value={0}>Select a slot</option>
+                    {filaments.map((name, slot) => <option disabled={!name} key={slot} value={slot + 1}>
+                      {slot + 1}: {spoolLabel(slot) || displayName(name)}
+                    </option>)}
+                  </select>
+                </label>
+              ))}
+            </div>
+          ) : !painted && (filaments.length > 1 || usesModelSlots) && (
             <label className="picked-filament">
-              <span className="muted">Filament slot</span>
+              <span className="muted filament-source">
+                {filaments[filamentOf(model.id) - 1] && <span aria-hidden="true" className="filament-chip" style={{ backgroundColor: slotColors[filamentOf(model.id) - 1] }} />}
+                Filament slot
+              </span>
               <select aria-label={`Filament slot for ${model.filename}`} value={filamentOf(model.id)}
                 onChange={(event) => setModelFilaments((slots) => ({ ...slots, [model.id]: Number(event.target.value) }))}>
                 <option value={0} disabled>Select a slot</option>
@@ -730,24 +753,6 @@ export default function SlicePage() {
         )}
         <fieldset className="filament-section span-2">
           <legend>Filaments</legend>
-          {palette.length > 0 && (
-            <div className="filament-grid" role="group" aria-label="Filament mapping">
-              {palette.map((color, index) => (
-                <label className="filament-map" key={index}>
-                  <span className="filament-source"><span aria-hidden="true" className="filament-chip" style={{ backgroundColor: color }} />{color}</span>
-                  <select aria-label={`Source color ${index + 1}: ${color}`} value={paintSlots[index] ?? 0} onChange={(event) => {
-                    const slot = Number(event.target.value);
-                    setPaintSlots((slots) => palette.map((_, position) => position === index ? slot : slots[position] ?? 0));
-                  }}>
-                    <option value={0}>Select a slot</option>
-                    {filaments.map((name, slot) => <option disabled={!name} key={slot} value={slot + 1}>
-                      {slot + 1}: {spoolLabel(slot) || displayName(name)}
-                    </option>)}
-                  </select>
-                </label>
-              ))}
-            </div>
-          )}
           <div className="filament-grid">
             {filaments.map((f, i) => (
               <div className="filament-slot" key={i}>
@@ -762,19 +767,17 @@ export default function SlicePage() {
                 <option value="">Select…</option>
                 {options("filament")}
               </select>
-              {filaments.length > 1 && (
-                <input
-                  type="color"
-                  aria-label={`Color for filament ${i + 1}`}
-                  title={`Filament ${i + 1}: ${filamentColors[i] || (painted ? "project color" : "preset color")}`}
-                  value={filamentColors[i] || "#f2754e"}
-                  onChange={(event) => {
-                    const color = event.target.value;
-                    setFilamentColors((colors) => filaments.map((_, index) => index === i ? color : colors[index] ?? ""));
-                  }}
-                />
-              )}
-              {filaments.length > 1 && filamentColors[i] && (
+              <input
+                type="color"
+                aria-label={`Color for filament ${i + 1}`}
+                title={`Color for filament ${i + 1}`}
+                value={filamentColors[i] || palette[paintSlots.indexOf(i + 1)] || slotColors[i]}
+                onChange={(event) => {
+                  const color = event.target.value;
+                  setFilamentColors((colors) => filaments.map((_, index) => index === i ? color : colors[index] ?? ""));
+                }}
+              />
+              {filamentColors[i] && (
                 <button type="button" className="icon-button secondary" title="Reset color"
                   aria-label={`Reset color for filament ${i + 1}`}
                   onClick={() => setFilamentColors((colors) => colors.map((color, index) => index === i ? "" : color))}>

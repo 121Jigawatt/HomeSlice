@@ -47,6 +47,15 @@ def test_listing(datadir):
     assert "Voron 0.4" in names and "fdm_common" not in names
 
 
+def test_filament_listing_colors(datadir):
+    write(datadir / "system/Voron/filament/Base.json", {"filament_colour": ["#238BC4"]})
+    write(datadir / "user/default/filament/Inherited.json", {"inherits": "Base"})
+    write(datadir / "user/default/filament/Custom.json", {"inherits": "Base", "filament_colour": "#01AB23"})
+    write(datadir / "user/default/filament/Empty.json", {"inherits": "Base", "filament_colour": []})
+    colors = {preset["name"]: preset["color"] for preset in ProfileStore(datadir).list("filament")}
+    assert colors == {"Custom": "#01ab23", "Empty": "#f2754e", "Inherited": "#238bc4"}
+
+
 def test_loop_and_missing(datadir):
     store = ProfileStore(datadir)
     with pytest.raises(ProfileError, match="loop"):
