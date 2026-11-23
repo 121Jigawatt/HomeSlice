@@ -14,20 +14,35 @@ const ACTIVE = new Set(["queued", "running"]);
 const GcodeViewer = lazy(() => import("../viewer/GcodeViewer"));
 
 function GcodePreview({ job }: { job: Job }) {
-  const gcode = job.files.find((f) => f.endsWith(".gcode"));
+  const files = job.files.filter((file) => file.endsWith(".gcode"));
+  const [bed, setBed] = useState(0);
+  const index = Math.min(bed, files.length - 1);
+  const gcode = files[index];
+  const stats = job.stats?.per_plate?.[index] ?? (files.length === 1 ? job.stats : null);
   const [open, setOpen] = useState(false);
   if (!gcode) return null;
   return (
     <div className="card stack">
       <div className="row between">
-        <strong>G-code preview</strong>
+        <strong>Bed preflight</strong>
         <button type="button" className="small secondary" onClick={() => setOpen(!open)} aria-expanded={open}>
           {open ? "Hide" : "Show preview"}
         </button>
       </div>
+      {files.length > 1 && <label>Bed
+        <select value={index} onChange={(event) => setBed(Number(event.target.value))}>
+          {files.map((file, position) => <option key={file} value={position}>Bed {position + 1}</option>)}
+        </select>
+      </label>}
+      <dl className="recap small">
+        <dt>Printer profile</dt><dd>{displayName(job.params.printer)}</dd>
+        <dt>Estimated time</dt><dd>{stats?.print_time ?? "Not reported"}</dd>
+        <dt>Filament slots</dt><dd>{stats?.used_slots || "Not reported"}</dd>
+        <dt>Prime tower</dt><dd>{stats?.prime_tower === "yes" ? "In toolpath" : "Not reported"}</dd>
+      </dl>
       {open && (
         <Suspense fallback={<div className="viewer placeholder muted small">Loading viewer…</div>}>
-          <GcodeViewer jobId={job.id} file={gcode} printerPreset={job.params.printer} />
+          <GcodeViewer key={gcode} jobId={job.id} file={gcode} printerPreset={job.params.printer} />
         </Suspense>
       )}
     </div>
@@ -646,11 +661,13 @@ function SendToPrinter({ job, canSlice }: { job: Job; canSlice: boolean }) {
             This job was sliced for the <b title={job.params.printer}>{displayName(job.params.printer)}</b> profile.
             {chosen ? ` ${chosen.name} uses ${displayName(chosen.printer_preset ?? "")}, so it needs its own slice.` : ""}
           </p>
-          {chosen && canSlice && (
+          {chosen && canSlice && (job.params.model_filaments?.length || job.params.filament_colors?.some(Boolean) ? (
+            <Link className="button" to={`/slice?from=${job.id}`}>Review filament slots in Slice</Link>
+          ) : (
             <button type="button" onClick={reslice} disabled={busy}>
               {busy ? "Starting…" : `Re-slice for ${chosen.name}…`}
             </button>
-          )}
+          ))}
           {msg && <p className={msg.ok ? "muted" : "error"}>{msg.text}</p>}
         </div>
       </div>

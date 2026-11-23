@@ -130,7 +130,7 @@ export function buildPlate(area: [number, number][], height: number): THREE.Grou
   const shape = new THREE.Shape(area.map(([x, y]) => new THREE.Vector2(x, y)));
   const plate = new THREE.Mesh(
     new THREE.ShapeGeometry(shape),
-    new THREE.MeshBasicMaterial({ color: 0x131c2e, side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({ color: 0x131c2e, side: THREE.FrontSide }),
   );
   plate.position.z = -0.05;
   group.add(plate);

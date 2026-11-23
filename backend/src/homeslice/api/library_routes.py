@@ -1,9 +1,11 @@
 import asyncio
+import zipfile
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from ..auth import Session
+from ..library import threemf
 from ..library.service import TooLarge
 from ..library.step import StepError
 from ..library.thumbnails import ThumbnailError
@@ -89,6 +91,20 @@ async def model_parts(model_id: str, request: Request, _: Session = Depends(brow
         raise HTTPException(404, "Not found") from None
     except (StepError, ThumbnailError) as e:
         raise HTTPException(422, str(e)) from None
+
+
+@router.get("/{model_id}/palette")
+def model_palette(model_id: str, request: Request, _: Session = Depends(browse)) -> list[str]:
+    try:
+        path = request.app.state.services.library.path_for(model_id)
+    except ValidationError:
+        path = None
+    if path is None:
+        raise HTTPException(404, "Not found")
+    try:
+        return threemf.source_palette(path) if path.suffix == ".3mf" else []
+    except (ThumbnailError, zipfile.BadZipFile, OSError) as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 @router.get("/{model_id}/thumbnail")

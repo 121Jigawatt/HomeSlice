@@ -58,6 +58,9 @@ class JobRequest:
     plate_selection: list[list[int]] = field(default_factory=list)
     # Start a new bed once object footprints would cover more than this % of it (set per printer).
     bed_coverage: int = 50
+    model_filaments: list[int] = field(default_factory=list)
+    filament_colors: list[str] = field(default_factory=list)
+    paint_slots: list[int] = field(default_factory=list)
 
     def counts(self) -> list[int]:
         return self.copies or [1] * len(self.model_ids)
@@ -147,14 +150,24 @@ def parse_gcode_stats(path: Path) -> dict[str, str]:
     size = path.stat().st_size
     with path.open("rb") as f:
         chunks = [f.read(256 * 1024)]
-        if size > 512 * 1024:
-            f.seek(size - 256 * 1024)
+        if size > 256 * 1024:
+            f.seek(max(0, size - 256 * 1024))
             chunks.append(f.read())
     for chunk in chunks:
         for line in chunk.decode("utf-8", errors="replace").splitlines():
+            if line.startswith("; filament used [g] = "):
+                grams = line.split("=", 1)[1].split(",")
+                if all(re.fullmatch(r"\s*\d+(?:\.\d+)?\s*", amount) for amount in grams):
+                    stats["used_slots"] = ", ".join(str(index) for index, amount in enumerate(grams, 1) if float(amount) > 0)
+            if re.match(r"^; (?:FEATURE|TYPE): (?:Prime|Wipe) tower\s*$", line, re.IGNORECASE):
+                stats["prime_tower"] = "yes"
             for key, pattern in _STAT_PATTERNS.items():
                 if key not in stats and (m := pattern.match(line)):
                     stats[key] = m.group(1).strip()[:100]
+    if "prime_tower" not in stats and size > 512 * 1024:
+        with path.open("rb") as stream:
+            if any(line.rstrip().lower() in (b"; feature: prime tower", b"; type: wipe tower") for line in stream):
+                stats["prime_tower"] = "yes"
     return stats
 
 
@@ -162,18 +175,19 @@ DEFAULT_FLUSH_MM3 = 280.0
 DEFAULT_FILAMENT_COLOUR = "#F2754E"
 
 
-def size_for_filaments(process_json: Path, filament_jsons: list[Path]) -> None:
+def size_for_filaments(process_json: Path, filament_jsons: list[Path], colors: list[str] | None = None) -> None:
     """Gives each slice one colour per filament and an N×N purge matrix.
 
     The GUI resizes these when filaments are added; the CLI keeps Orca's 4×4 default and a single colour,
     which breaks MMU firmware (e.g. Happy Hare) that reads them from the G-code.
     """
     n = len(filament_jsons)
-    for path in filament_jsons:
+    for index, path in enumerate(filament_jsons):
         data = json.loads(path.read_text(encoding="utf-8"))
         colour = data.get("filament_colour")
         colour = colour[0] if isinstance(colour, list) and colour else colour
-        data["filament_colour"] = [colour if isinstance(colour, str) and colour else DEFAULT_FILAMENT_COLOUR]
+        override = colors[index] if colors else ""
+        data["filament_colour"] = [override or (colour if isinstance(colour, str) and colour else DEFAULT_FILAMENT_COLOUR)]
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     process = json.loads(process_json.read_text(encoding="utf-8"))
@@ -230,6 +244,19 @@ class JobManager:
             raise SliceArgsError("Select between 1 and 50 models")
         if not 1 <= len(req.filaments) <= 16:
             raise SliceArgsError("Select between 1 and 16 filaments")
+        if req.paint_slots and (len(set(req.paint_slots)) != len(req.paint_slots)
+                                or any(not 1 <= slot <= len(req.filaments) for slot in req.paint_slots)):
+            raise SliceArgsError("Each painted color needs a different configured filament slot")
+        if req.filament_colors and (
+            len(req.filament_colors) != len(req.filaments)
+            or any(color and not re.fullmatch(r"#[0-9A-Fa-f]{6}", color) for color in req.filament_colors)
+        ):
+            raise SliceArgsError("Give one valid color or preset default per filament slot")
+        if req.model_filaments and (
+            len(req.model_filaments) != len(req.model_ids)
+            or any(not 1 <= slot <= len(req.filaments) for slot in req.model_filaments)
+        ):
+            raise SliceArgsError("Choose a valid filament slot for each model")
         if req.copies and len(req.copies) != len(req.model_ids):
             raise SliceArgsError("Give one copy count per model")
         counts = req.counts()
@@ -474,9 +501,14 @@ class JobManager:
                 self._profiles.write_resolved("filament", name, profiles_dir / f"filament_{i}.json")
                 for i, name in enumerate(req.filaments)
             ]
-            size_for_filaments(process, filaments)
-            groups = await self._plate_groups(req, jdir, printer)
-            if any(p is None for g in groups for p in g):
+            painted_inputs, palette = await asyncio.to_thread(self._prepare_painted_project, req, jdir)
+            painted_project = bool(painted_inputs)
+            colors = req.filament_colors
+            if palette:
+                colors = [color or original for color, original in zip(colors or [""] * len(palette), palette)]
+            size_for_filaments(process, filaments, colors)
+            groups = [[(path, 1)] for path in painted_inputs] if painted_project else await self._plate_groups(req, jdir, printer)
+            if any(path is None for group in groups for path, _ in group):
                 raise SliceArgsError("A selected model no longer exists")
         except (ProfileError, SliceArgsError, StepError, ThumbnailError, zipfile.BadZipFile, OSError, ValueError) as e:
             self._finish(job_id, "failed", str(e), error_kind="setup")
@@ -487,16 +519,21 @@ class JobManager:
         for r, group in enumerate(groups, start=1):
             run_out = outdir / f"run_{r}" if len(groups) > 1 else outdir
             run_out.mkdir(parents=True, exist_ok=True)
+            slots = [slot for _, slot in group] if req.model_filaments and not painted_project else []
+            overrides = dict(req.overrides)
+            if painted_project or len(set(slots)) > 1:
+                overrides.setdefault("enable_prime_tower", "1")
             spec = SliceSpec(
-                inputs=[p.resolve() for p in group if p],
+                inputs=[path.resolve() for path, _ in group if path is not None],
+                filament_ids=slots,
                 printer_json=printer.resolve(),
                 process_json=process.resolve(),
                 filament_jsons=[f.resolve() for f in filaments],
-                overrides=req.overrides,
+                overrides=overrides,
                 # Separate object files have no shared layout, so they must be arranged.
-                arrange=req.arrange or len(group) > 1,
+                arrange=bool(painted_project) or req.arrange or len(group) > 1,
                 orient=req.orient,
-                plate=req.plate,
+                plate=0 if painted_project else req.plate,
             )
             log_file = jdir / f"orca_{r}.log"
             try:
@@ -553,17 +590,53 @@ class JobManager:
         shutil.rmtree(datadir, ignore_errors=True)
         self._finish(job_id, "done", None, combine_stats([parse_gcode_stats(g) for g in gcodes]))
 
-    async def _plate_groups(self, req: JobRequest, jdir: Path, printer_json: Path) -> list[list[Path | None]]:
+    def _prepare_painted_project(self, req: JobRequest, jdir: Path) -> tuple[list[Path], list[str]]:
+        for model_id in req.model_ids:
+            source = self._library.path_for(model_id)
+            if source is None or source.suffix != ".3mf" or not threemf.source_palette(source):
+                continue
+            if len(req.model_ids) != 1:
+                raise SliceArgsError("Slice a painted 3MF separately from other files")
+            if req.model_filaments and req.model_filaments != [1]:
+                raise SliceArgsError("Painted 3MFs use their source slot order, not a single model slot")
+            copies, = req.counts()
+            plate, = req.plates_for()
+            selected, = req.selections()
+            destinations = []
+            palette = []
+            if plate == SEPARATE_PLATES:
+                selections = [[saved["index"]] for saved in threemf.plates(source) if not selected or saved["index"] in selected]
+                batches = [(selection, 1) for selection in selections for _ in range(copies)]
+            else:
+                batches = [([plate] if plate else selected, copies)]
+            if len(threemf.objects(source)) * copies > MAX_OBJECTS:
+                raise SliceArgsError(f"At most {MAX_OBJECTS} painted objects can be sliced at once")
+            by_selection: dict[tuple[int, ...], Path] = {}
+            for selection, count in batches:
+                key = tuple(selection)
+                if key not in by_selection:
+                    destination = jdir / "inputs" / f"painted_{len(by_selection) + 1}.3mf"
+                    palette = threemf.write_painted_project(source, destination, len(req.filaments), selection, count,
+                                                           req.paint_slots)
+                    by_selection[key] = destination
+                destinations.append(by_selection[key])
+            return destinations, palette
+        if req.paint_slots:
+            raise SliceArgsError("Paint slot mapping requires a painted 3MF")
+        return [], []
+
+    async def _plate_groups(self, req: JobRequest, jdir: Path, printer_json: Path) -> list[list[tuple[Path | None, int]]]:
         """Splits the objects into bed groups, each sliced by its own Orca run.
 
         A 3MF sliced with "each plate separately" keeps its plates; everything else is packed in order and a new
         bed starts once footprints would cover more than req.bed_coverage % of the bed. Orca still spills anything
         that physically doesn't fit onto further beds within a run.
         """
-        fixed: list[list[Path | None]] = []
-        loose: list[Path | None] = []
-        for i, (mid, n, plate, chosen) in enumerate(
-            zip(req.model_ids, req.counts(), req.plates_for(), req.selections())
+        fixed: list[list[tuple[Path | None, int]]] = []
+        loose: list[tuple[Path | None, int]] = []
+        slots = req.model_filaments or [1] * len(req.model_ids)
+        for i, (mid, n, plate, chosen, slot) in enumerate(
+            zip(req.model_ids, req.counts(), req.plates_for(), req.selections(), slots)
         ):
             source = self._library.path_for(mid)
             if source is not None and source.suffix == ".3mf" and plate == SEPARATE_PLATES:
@@ -573,27 +646,27 @@ class JobManager:
                     parts = await asyncio.to_thread(
                         threemf.write_items, source, jdir / "inputs" / f"{i}_plate{p['index']}", p["index"]
                     )
-                    fixed += [list(parts) for _ in range(n)]
+                    fixed += [[(path, slot) for path in parts] for _ in range(n)]
             elif source is not None and source.suffix == ".3mf":
                 parts = await asyncio.to_thread(threemf.write_items, source, jdir / "inputs" / str(i), plate or chosen)
-                loose += list(parts) * n
+                loose += [(path, slot) for path in parts] * n
             else:
-                loose += [await asyncio.to_thread(self._library.mesh_path, mid)] * n
+                loose += [(await asyncio.to_thread(self._library.mesh_path, mid), slot)] * n
         if len(loose) <= 1:
             return fixed + ([loose] if loose else [])
         limit = bed_area(printer_json) * max(MIN_COVERAGE, min(100, req.bed_coverage)) / 100
         footprints: dict[Path, float] = {}
-        groups: list[list[Path | None]] = []
-        current: list[Path | None] = []
+        groups: list[list[tuple[Path | None, int]]] = []
+        current: list[tuple[Path | None, int]] = []
         covered = 0.0
-        for path in loose:
+        for path, slot in loose:
             if path is not None and path not in footprints:
                 footprints[path] = await asyncio.to_thread(footprint_mm2, path)
             area = footprints.get(path, 0.0) if path is not None else 0.0
             if current and covered + area > limit:
                 groups.append(current)
                 current, covered = [], 0.0
-            current.append(path)
+            current.append((path, slot))
             covered += area
         groups.append(current)
         return fixed + groups

@@ -3,7 +3,6 @@
 
 interface Out {
   ext: number[];
-  // 1 per extrusion segment that is support material (Orca/Prusa ";TYPE:Support...").
   extSupport: number[];
   trav: number[];
   extEnds: number[];
@@ -15,7 +14,7 @@ const ARC_SEGMENT_MM = 1;
 
 function parse(text: string): Out {
   const out: Out = { ext: [], extSupport: [], trav: [], extEnds: [], travEnds: [], layerZ: [] };
-  let support = false;
+  let feature = 0;
   let x = 0, y = 0, z = 0, e = 0;
   let absXYZ = true, absE = true;
   // Orca/Bambu/Prusa slicers mark layers with ";Z:<height>"; otherwise fall back to Z changes.
@@ -43,7 +42,10 @@ function parse(text: string): Out {
 
     if (raw.startsWith(";")) {
       if (hasMarkers && raw.startsWith(";Z:")) startLayer(parseFloat(raw.slice(3)));
-      else if (raw.startsWith(";TYPE:")) support = /^;TYPE:\s*Support/i.test(raw);
+      else if (/^;\s*(?:TYPE|FEATURE):/i.test(raw)) {
+        feature = /^;\s*(?:TYPE|FEATURE):\s*(?:Prime|Wipe) tower/i.test(raw) ? 2
+          : /^;\s*(?:TYPE|FEATURE):\s*Support/i.test(raw) ? 1 : 0;
+      }
       continue;
     }
     const semi = raw.indexOf(";");
@@ -88,12 +90,12 @@ function parse(text: string): Out {
           const a = a0 + (a1 - a0) * t;
           const qx = cx + r * Math.cos(a), qy = cy + r * Math.sin(a), qz = z + (nz - z) * t;
           target.push(px, py, pz, qx, qy, qz);
-          if (extruding) out.extSupport.push(support ? 1 : 0);
+          if (extruding) out.extSupport.push(feature);
           px = qx; py = qy; pz = qz;
         }
       } else if (nx !== x || ny !== y || nz !== z) {
         target.push(x, y, z, nx, ny, nz);
-        if (extruding) out.extSupport.push(support ? 1 : 0);
+        if (extruding) out.extSupport.push(feature);
       }
       x = nx; y = ny; z = nz;
     }

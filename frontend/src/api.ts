@@ -123,6 +123,9 @@ export interface Job {
   params: {
     model_ids: string[];
     copies?: number[];
+    model_filaments?: number[];
+    filament_colors?: string[];
+    paint_slots?: number[];
     model_plates?: number[];
     plate_selection?: number[][];
     printer: string;
@@ -200,7 +203,7 @@ export interface QueueItem {
   job_title: string | null;
   file: string;
   position: number;
-  status: "waiting" | "sending" | "sent" | "failed" | "cancelled";
+  status: "waiting" | "sending" | "sent" | "printed" | "failed" | "cancelled";
   error: string | null;
   owner: string | null;
   created_at: number;

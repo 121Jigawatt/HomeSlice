@@ -1,6 +1,8 @@
 import asyncio
+import json
 import uuid
 import zipfile
+from pathlib import Path
 
 import homeslice.orca.jobs as jobs_module
 import numpy as np
@@ -138,3 +140,100 @@ def test_3mf_sliced_as_objects_without_project_settings(settings):
             services.jobs.submit(JobRequest([mid], "P", "Q", ["F"], model_plates=[5]))
     finally:
         services.db.close()
+
+
+def test_painted_project_slices_with_target_profiles(settings, monkeypatch):
+    services = build_services(settings)
+    try:
+        add_presets(settings)
+        model_id = uuid.uuid4().hex
+        services.db.execute(
+            "INSERT INTO models(id, filename, ext, size, sha256, created_at) VALUES(?, 'Painted.3mf', '.3mf', 1, 'x', 0)",
+            (model_id,),
+        )
+        source = settings.library_dir / f"{model_id}.3mf"
+        root = (
+            f'<model xmlns="{NS}" xmlns:p="{P}"><resources><object id="2" type="model"><components>'
+            '<component objectid="1" p:path="/3D/Objects/painted.model"/></components></object></resources>'
+            '<build><item objectid="2" transform="1 0 0 0 1 0 0 0 1 120 40 0"/></build></model>'
+        )
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("3D/3dmodel.model", root)
+            archive.writestr("3D/Objects/painted.model", _object_model(1).replace('v1="0"', 'v1="0" paint_color="8"'))
+            archive.writestr("Metadata/project_settings.config", json.dumps({
+                "printer_settings_id": "Original Printer", "filament_colour": ["#ff0000", "#0000ff"],
+                "post_process": ["not imported"],
+            }))
+            archive.writestr("Metadata/custom_gcode_per_layer.xml", "not imported")
+
+        with pytest.raises(ThumbnailError, match="Choose 2 filament slots"):
+            threemf.write_painted_project(source, settings.data_dir / "wrong.3mf", 1)
+
+        seen = []
+
+        async def fake_run(args, cwd, timeout, memory):
+            seen.append(args)
+            return RunResult(1, False, "")
+
+        monkeypatch.setattr(jobs_module, "run_orca", fake_run)
+        monkeypatch.setattr(services.versions, "current_binary", lambda: settings.data_dir / "AppRun")
+        job_id = services.jobs.submit(JobRequest([model_id], "P", "Q", ["F", "F"], arrange=False,
+                             model_filaments=[1], filament_colors=["", "#ffffff"]))
+        asyncio.run(services.jobs._run(job_id))
+        args, = seen
+        assert "--arrange" in args and "--enable-prime-tower=1" in args
+        assert "--load-filament-ids" not in args
+        printer, process = args[args.index("--load-settings") + 1].split(";")
+        assert json.loads(Path(printer).read_text())["name"] == "P"
+        assert json.loads(Path(process).read_text())["name"] == "Q"
+        filaments = args[args.index("--load-filaments") + 1].split(";")
+        assert [json.loads(Path(path).read_text())["filament_colour"] for path in filaments] == [["#ff0000"], ["#ffffff"]]
+        rebuilt = Path(args[-1])
+        assert rebuilt != source and rebuilt.suffix == ".3mf"
+        with zipfile.ZipFile(rebuilt) as archive:
+            assert set(archive.namelist()) == {"[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model"}
+            mesh = archive.read("3D/3dmodel.model")
+            assert b'paint_color="8"' in mesh and b"p:path" not in mesh
+        assert threemf.item_meshes(rebuilt)[0][0, 0].tolist() == [120, 40, 0]
+        swapped = settings.data_dir / "swapped.3mf"
+        assert threemf.write_painted_project(source, swapped, 2, copies=2, slot_map=[2, 1]) == ["#0000ff", "#ff0000"]
+        assert len(threemf.objects(swapped)) == 2
+        with zipfile.ZipFile(swapped) as archive:
+            assert b'paint_color="4"' in archive.read("3D/3dmodel.model")
+    finally:
+        services.db.close()
+
+
+def test_remap_subdivided_paint():
+    assert threemf._remap_paint("841", (2, 3)) == "0C81"
+    with pytest.raises(ThumbnailError, match="Invalid paint"):
+        threemf._remap_paint("41", (2, 1))
+
+
+def test_part_colors_and_selected_plate(tmp_path):
+    source = tmp_path / "parts.3mf"
+    root = (
+        f'<model xmlns="{NS}" xmlns:p="{P}"><resources>'
+        '<object id="2" type="model"><components><component objectid="1" p:path="/3D/part.model"/></components></object>'
+        '<object id="3" type="model"><components><component objectid="1" p:path="/3D/part.model"/></components></object>'
+        '</resources><build><item objectid="2"/><item objectid="3" transform="1 0 0 0 1 0 0 0 1 100 0 0"/></build></model>'
+    )
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("3D/3dmodel.model", root)
+        archive.writestr("3D/part.model", _object_model(1))
+        archive.writestr("Metadata/project_settings.config", '{"filament_colour":["#ff0000","#0000ff"]}')
+        archive.writestr("Metadata/model_settings.config", '<config><object id="3"><part id="1" subtype="normal_part">'
+                         '<metadata key="extruder" value="2"/></part></object>' + ''.join(
+                             f'<plate><metadata key="plater_id" value="{index}"/><model_instance>'
+                             f'<metadata key="object_id" value="{index + 1}"/></model_instance></plate>'
+                             for index in (1, 2)
+                         ) + '</config>')
+    assert threemf.source_palette(source) == ["#ff0000", "#0000ff"]
+    output = tmp_path / "plate.3mf"
+    threemf.write_painted_project(source, output, 2, selection=[2], copies=2)
+    meshes = threemf.item_meshes(output)
+    assert len(meshes) == 2 and all(mesh[0, 0].tolist() == [100, 0, 0] for mesh in meshes)
+    with zipfile.ZipFile(output) as archive:
+        assert b'paint_color="8"' in archive.read("3D/3dmodel.model")
+    threemf.write_painted_project(source, output, 2, slot_map=[2, 1])
+    assert len(threemf.item_meshes(output)) == 2

@@ -49,6 +49,15 @@ interface SliceSettings {
   orient: boolean;
 }
 
+interface PrintRecipe extends SliceSettings {
+  copies: number;
+  plateChoice?: PlateChoice;
+  paintSlots: number[];
+  filamentColors: string[];
+  modelSlot?: number;
+  targetId: string;
+}
+
 function fromJob(job: Job): SliceSettings {
   const p = job.params;
   const ov = p.overrides ?? {};
@@ -73,6 +82,7 @@ export default function SlicePage() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(params.getAll("model")));
   const [copies, setCopies] = useState<Record<string, number>>({});
+  const [modelFilaments, setModelFilaments] = useState<Record<string, number>>({});
   const countOf = (id: string) => copies[id] ?? 1;
   const [plateChoices, setPlateChoices] = useState<Record<string, PlateChoice>>({});
   // Multi-plate 3MF projects default to their first plate rather than everything at once.
@@ -87,6 +97,11 @@ export default function SlicePage() {
   const [filaments, setFilaments] = useState<string[]>(() =>
     JSON.parse(localStorage.getItem("slice.filaments") ?? '[""]'),
   );
+  const [filamentColors, setFilamentColors] = useState<string[]>([]);
+  const [paintSlots, setPaintSlots] = useState<number[]>([]);
+  const [palettes, setPalettes] = useState<Record<string, string[]>>({});
+  const [paletteErrors, setPaletteErrors] = useState<Record<string, string>>({});
+  const [spoolLabels, setSpoolLabels] = useState<Record<string, string>>({});
   const [layerHeight, setLayerHeight] = useState("");
   const [bedType, setBedType] = useState(() => localStorage.getItem("slice.bedType") ?? "Textured PEI Plate");
   const [infill, setInfill] = useState("");
@@ -104,10 +119,17 @@ export default function SlicePage() {
   const target = configs?.find((c) => c.id === targetId && c.printer_preset);
   const machine = machines?.find((m) => m.id === target?.id);
 
+  function reviewFilamentSlots() {
+    setModelFilaments((slots) => Object.fromEntries(Object.keys(slots).map((id) => [id, 0])));
+    setFilamentColors([]);
+    setPaintSlots([]);
+  }
+
   function applyTarget(c: PrinterConfig | undefined) {
     setTargetId(c?.id ?? "");
     localStorage.setItem("send.printer", c?.id ?? "");
     if (!c?.printer_preset) return;
+    if ((targetId && c.id !== targetId) || c.printer_preset !== printer) reviewFilamentSlots();
     setPrinter(c.printer_preset);
     if (c.default_process) setProcess(c.default_process);
     if (c.default_filaments.length) setFilaments(c.default_filaments);
@@ -154,6 +176,10 @@ export default function SlicePage() {
           apply(fromJob(job));
           setSelected(new Set(job.params.model_ids));
           setCopies(Object.fromEntries(job.params.model_ids.map((id, i) => [id, job.params.copies?.[i] ?? 1])));
+          const savedSlots = job.params.model_filaments;
+          setModelFilaments(savedSlots?.length ? Object.fromEntries(job.params.model_ids.map((id, i) => [id, savedSlots[i]])) : {});
+          setFilamentColors(job.params.filament_colors ?? []);
+          setPaintSlots(job.params.paint_slots ?? []);
           setPlateChoices(
             Object.fromEntries(
               job.params.model_ids.map((id, i) => {
@@ -283,6 +309,22 @@ export default function SlicePage() {
   const sharedBeds = beds?.some((b) => b.projectPlate === undefined && b.parts.length > 0) ?? false;
   const totalObjects = beds ? beds.reduce((n, b) => n + b.parts.length, 0) : selectedModels.length;
   const chosenFilaments = filaments.filter(Boolean);
+  const projects = selectedModels.filter((model) => model.ext === ".3mf");
+  const painted = projects.find((model) => palettes[model.id]?.length);
+  const palette = painted ? palettes[painted.id] : [];
+  const labelKey = (index: number) => `slice.spool.${targetId || printer}.${index}`;
+  const spoolLabel = (index: number) => spoolLabels[labelKey(index)] ?? localStorage.getItem(labelKey(index)) ?? "";
+  useEffect(() => {
+    let cancelled = false;
+    for (const model of selectedModels.filter((entry) => entry.ext === ".3mf")) {
+      api<string[]>(`/api/library/${model.id}/palette`)
+        .then((colors) => { if (!cancelled) setPalettes((previous) => ({ ...previous, [model.id]: colors })); })
+        .catch((error: Error) => { if (!cancelled) setPaletteErrors((previous) => ({ ...previous, [model.id]: error.message })); });
+    }
+    return () => { cancelled = true; };
+  }, [selectedModels]);
+  const usesModelSlots = [...selected].some((id) => modelFilaments[id] !== undefined);
+  const filamentOf = (id: string) => modelFilaments[id] ?? 1;
 
   const blockers: string[] = [];
   if (selected.size === 0) blockers.push("Select at least one model.");
@@ -296,6 +338,15 @@ export default function SlicePage() {
   else if (incompat.process[process])
     blockers.push(`Process "${displayName(process)}" doesn't suit this printer (${incompat.process[process]}).`);
   if (chosenFilaments.length === 0) blockers.push("Choose a filament.");
+  for (const project of projects) {
+    if (paletteErrors[project.id]) blockers.push(paletteErrors[project.id]);
+    else if (!palettes[project.id]) blockers.push(`Checking colors for ${project.filename}…`);
+  }
+  if (painted && selected.size !== 1) blockers.push("Slice the painted 3MF separately from other files.");
+  if (painted && (chosenFilaments.length !== filaments.length || paintSlots.length !== palette.length || new Set(paintSlots).size !== palette.length || paintSlots.some((slot) => !filaments[slot - 1])))
+    blockers.push("Map each source color to a different filament slot.");
+  if (!painted && usesModelSlots && (chosenFilaments.length !== filaments.length || [...selected].some((id) => !filaments[filamentOf(id) - 1])))
+    blockers.push("Choose a valid filament slot for each model.");
   chosenFilaments
     .filter((f) => incompat.filament[f])
     .forEach((f) => blockers.push(`Filament "${displayName(f)}" doesn't suit this printer (${incompat.filament[f]}).`));
@@ -304,6 +355,37 @@ export default function SlicePage() {
     const next = new Set(selected);
     next.has(id) ? next.delete(id) : next.add(id);
     setSelected(next);
+  }
+
+  const recipeModel = selectedModels.length === 1 ? selectedModels[0] : undefined;
+  const recipeKey = recipeModel ? `slice.recipe.${recipeModel.id}` : "";
+  function saveRecipe() {
+    if (!recipeModel || blockers.length) return;
+    const recipe: PrintRecipe = { printer, process, filaments, bedType, layerHeight, infill, supports, arrange, orient,
+      targetId, copies: countOf(recipeModel.id), plateChoice: choiceOf(recipeModel), paintSlots, filamentColors,
+      modelSlot: modelFilaments[recipeModel.id] };
+    localStorage.setItem(recipeKey, JSON.stringify(recipe));
+    setPrefillNote(`Recipe saved for ${recipeModel.filename}.`);
+  }
+
+  function loadRecipe() {
+    if (!recipeModel) return;
+    const saved = localStorage.getItem(recipeKey);
+    if (!saved) return;
+    try {
+      const recipe = JSON.parse(saved) as PrintRecipe;
+      const sameTarget = recipe.printer === printer && recipe.targetId === targetId;
+      setCopies({ [recipeModel.id]: recipe.copies });
+      setPlateChoices(recipe.plateChoice ? { [recipeModel.id]: recipe.plateChoice } : {});
+      const settings = sameTarget ? recipe : { ...recipe, printer, process, filaments, bedType };
+      apply(settings);
+      setPaintSlots(sameTarget ? recipe.paintSlots : []);
+      setFilamentColors(sameTarget ? recipe.filamentColors : []);
+      setModelFilaments(recipe.modelSlot === undefined ? {} : { [recipeModel.id]: sameTarget ? recipe.modelSlot : 0 });
+      setPrefillNote(sameTarget ? "Recipe loaded." : "Recipe loaded. Review the filament slots for this printer.");
+    } catch {
+      setError("Couldn't read the saved recipe.");
+    }
   }
 
   async function submit(e: FormEvent) {
@@ -332,6 +414,8 @@ export default function SlicePage() {
         json: {
           model_ids: [...selected],
           copies: [...selected].map(countOf),
+          model_filaments: !painted && usesModelSlots ? [...selected].map(filamentOf) : [],
+          paint_slots: painted ? paintSlots : [],
           ...(() => {
             const reqs = [...selected].map((id) => {
               const m = models.find((x) => x.id === id);
@@ -341,7 +425,8 @@ export default function SlicePage() {
           })(),
           printer,
           process,
-          filaments: chosenFilaments,
+          filaments: painted ? filaments : chosenFilaments,
+          filament_colors: filaments.flatMap((name, index) => name ? [filamentColors[index] ?? ""] : []),
           overrides,
           arrange,
           orient,
@@ -384,6 +469,10 @@ export default function SlicePage() {
 
       <fieldset className="card stack slice-models">
         <legend>Models</legend>
+        {recipeModel && <div className="row">
+          <button type="button" className="secondary small" onClick={saveRecipe} disabled={blockers.length > 0}>Save recipe</button>
+          {localStorage.getItem(recipeKey) && <button type="button" className="secondary small" onClick={loadRecipe}>Load recipe</button>}
+        </div>}
         <ModelPicker
           models={models}
           loaded={modelsLoaded}
@@ -569,7 +658,7 @@ export default function SlicePage() {
               <option value={printer}>{displayName(printer)} (from {target.name})</option>
             </select>
           ) : (
-            <select value={printer} onChange={(e) => setPrinter(e.target.value)} required title={printer}>
+            <select value={printer} onChange={(e) => { reviewFilamentSlots(); setPrinter(e.target.value); }} required title={printer}>
               <option value="">Select…</option>
               {options("printer")}
             </select>
@@ -586,10 +675,11 @@ export default function SlicePage() {
           <p className="muted small">Presets made for other printers are greyed out.</p>
         )}
         {filaments.map((f, i) => (
-          <label key={i}>
-            Filament {filaments.length > 1 ? i + 1 : ""}
+          <div className="stack" key={i}>
+            <label htmlFor={`filament-slot-${i}`}>Filament {filaments.length > 1 ? i + 1 : ""}</label>
             <div className="row">
               <select
+                id={`filament-slot-${i}`}
                 className="grow"
                 value={f}
                 title={f}
@@ -603,20 +693,85 @@ export default function SlicePage() {
                 <button
                   type="button"
                   className="small secondary"
-                  onClick={() => setFilaments(filaments.filter((_, j) => j !== i))}
+                  onClick={() => {
+                    setFilaments(filaments.filter((_, j) => j !== i));
+                    setPaintSlots([]);
+                    setFilamentColors((colors) => colors.filter((_, index) => index !== i));
+                    setModelFilaments((slots) => Object.fromEntries(Object.entries(slots).map(([id, slot]) => [
+                      id, slot === i + 1 ? (filaments.length === 2 ? 1 : 0) : slot > i + 1 ? slot - 1 : slot,
+                    ])));
+                  }}
                   aria-label={`Remove filament ${i + 1}`}
                 >
                   ✕
                 </button>
               )}
             </div>
-          </label>
+            {filaments.length > 1 && (
+              <div className="row">
+                <input
+                  type="color"
+                  aria-label={`Color for filament ${i + 1}`}
+                  title={`Color for filament ${i + 1}`}
+                  value={filamentColors[i] || "#f2754e"}
+                  style={{ width: "3rem" }}
+                  onChange={(event) => {
+                    const color = event.target.value;
+                    setFilamentColors((colors) => filaments.map((_, index) => index === i ? color : colors[index] ?? ""));
+                  }}
+                />
+                {filamentColors[i] ? (
+                  <button type="button" className="small secondary" onClick={() => setFilamentColors((colors) => colors.map((color, index) => index === i ? "" : color))}>
+                    Use preset color
+                  </button>
+                ) : <span className="muted">Preset color</span>}
+              </div>
+            )}
+            {palette.length > 0 && <label>
+              Spool label for slot {i + 1}
+              <input value={spoolLabel(i)} maxLength={80} onChange={(event) => {
+                const key = labelKey(i);
+                localStorage.setItem(key, event.target.value);
+                setSpoolLabels((labels) => ({ ...labels, [key]: event.target.value }));
+              }} />
+            </label>}
+          </div>
         ))}
         {filaments.length < 16 && (
           <button type="button" className="small secondary" onClick={() => setFilaments([...filaments, ""])}>
             + Add filament
           </button>
         )}
+        {palette.map((color, index) => (
+          <label key={index}>
+            <span className="row"><span aria-hidden="true" style={{ backgroundColor: color, width: "1rem", height: "1rem" }} /> Source color {index + 1}: {color}</span>
+            <select value={paintSlots[index] ?? 0} onChange={(event) => {
+              const slot = Number(event.target.value);
+              setPaintSlots((slots) => palette.map((_, position) => position === index ? slot : slots[position] ?? 0));
+            }}>
+              <option value={0}>Select a filament slot</option>
+              {filaments.map((name, slot) => <option disabled={!name} key={slot} value={slot + 1}>
+                {slot + 1}: {spoolLabel(slot) || displayName(name)}
+              </option>)}
+            </select>
+          </label>
+        ))}
+        {!painted && (filaments.length > 1 || usesModelSlots) && selectedModels.map((model) => (
+          <label key={model.id}>
+            Filament slot for {model.filename}
+            <select
+              value={filamentOf(model.id)}
+              onChange={(event) => setModelFilaments((slots) => ({ ...slots, [model.id]: Number(event.target.value) }))}
+            >
+              <option value={0} disabled>Select a filament slot</option>
+              {filaments.map((name, index) => (
+                <option key={index} value={index + 1} disabled={!name}>
+                  {index + 1}: {displayName(name)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
         <label>
           Plate type
           <select value={bedType} onChange={(e) => setBedType(e.target.value)}>

@@ -13,6 +13,7 @@ const ITEM_STATUS: Record<QueueItem["status"], string> = {
   waiting: "Waiting",
   sending: "Starting…",
   sent: "Started",
+  printed: "Printed",
   failed: "Failed",
   cancelled: "Cancelled",
 };
@@ -60,6 +61,22 @@ export function PrintQueuePanel() {
     if (!ok) return;
     try {
       await api(`/api/queue/${it.id}`, { method: "DELETE" });
+    } catch (e) {
+      notify((e as Error).message, { tone: "error" });
+    }
+    load();
+  }
+
+  async function retry(it: QueueItem) {
+    const ok = await confirm({
+      title: `Requeue ${it.file} on ${it.printer_name}?`,
+      body: <p>Check that the previous attempt is no longer printing. Only this bed will be queued.</p>,
+      confirmLabel: "Requeue bed",
+    });
+    if (!ok) return;
+    try {
+      await api("/api/queue", { method: "POST", json: { printer_id: it.printer_id, job_id: it.job_id, file: it.file } });
+      notify(`Requeued ${it.file}.`, { tone: "success" });
     } catch (e) {
       notify((e as Error).message, { tone: "error" });
     }
@@ -140,15 +157,20 @@ export function PrintQueuePanel() {
             )}
             {done.length > 0 && (
               <ul className="list small">
-                {done.slice(0, 5).map((it) => (
+                {[...done].sort((left, right) => (right.sent_at ?? right.created_at) - (left.sent_at ?? left.created_at)).slice(0, 5).map((it) => (
                   <li key={it.id} className="row between">
                     <Link className="grow plain" to={`/jobs/${it.job_id}`}>
                       {it.job_title ?? it.file}
+                      {it.job_title && <small className="block muted">{it.file}</small>}
                     </Link>
-                    <span className={`badge ${it.status === "failed" ? "failed" : it.status === "sent" ? "done" : ""}`} title={it.error ?? ""}>
+                    <span className={`badge ${it.status === "failed" ? "failed" : it.status === "printed" ? "done" : ""}`} title={it.error ?? ""}>
                       <Icon name={it.status === "failed" ? "error" : it.status === "sent" ? "printing" : "offline"} size={14} />{" "}
                       {ITEM_STATUS[it.status]}
                     </span>
+                    {it.status === "failed" && me.can("printers.print") && canCancel(it) &&
+                      !list.some((entry) => entry.job_id === it.job_id && entry.file === it.file && entry.created_at > it.created_at) && (
+                        <button type="button" className="secondary small" onClick={() => retry(it)}>Requeue bed</button>
+                    )}
                   </li>
                 ))}
               </ul>

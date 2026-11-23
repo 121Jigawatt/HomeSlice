@@ -135,6 +135,7 @@ class PrintQueue:
             live = await self._printers.live()  # Also updates the bed flags from state changes.
             sent: list[str] = []
             for p in live:
+                self._observe_result(p)
                 if not p.get("connected") or p.get("state") not in READY_STATES or p.get("needs_attention"):
                     continue
                 row = self._db.one(
@@ -144,6 +145,24 @@ class PrintQueue:
                 if row is not None and await self._send(dict(row), p["name"]):
                     sent.append(row["id"])
             return sent
+
+    def _queued_name(self, item: dict[str, Any]) -> str:
+        name = self._remote_name(item["job_id"], item["file"])
+        return f"{name.removesuffix('.gcode')}-{item['id'][:12]}.gcode"
+
+    def _observe_result(self, printer: dict[str, Any]) -> None:
+        state = printer.get("state")
+        filename = printer.get("filename")
+        if not printer.get("connected") or state not in ("complete", "error", "cancelled") or not filename:
+            return
+        row = self._db.one(
+            "SELECT * FROM print_queue WHERE printer_id=? AND status='sent' ORDER BY sent_at DESC LIMIT 1",
+            (printer["id"],),
+        )
+        if row is None or self._queued_name(dict(row)) != filename:
+            return
+        self._finish(row["id"], "printed" if state == "complete" else "failed",
+                     None if state == "complete" else f"Printer reported {state} for this bed.")
 
     async def _send(self, item: dict[str, Any], printer_name: str) -> bool:
         path = self._gcode_path(item["job_id"], item["file"])
@@ -162,7 +181,7 @@ class PrintQueue:
             return False
         self._db.execute("UPDATE print_queue SET status='sending' WHERE id=?", (item["id"],))
         try:
-            remote = self._remote_name(item["job_id"], item["file"])
+            remote = self._queued_name(item)
             await self._printers.run(item["printer_id"], lambda c: c.upload(path, remote, start=True))
         except PrinterBusy:
             self._db.execute("UPDATE print_queue SET status='waiting' WHERE id=?", (item["id"],))

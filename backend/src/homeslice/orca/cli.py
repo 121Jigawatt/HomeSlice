@@ -113,6 +113,7 @@ class SliceSpec:
     arrange: bool = True
     orient: bool = False
     plate: int = 0
+    filament_ids: list[int] = field(default_factory=list)
 
 
 def _safe_path(p: Path) -> str:
@@ -128,6 +129,11 @@ def build_args(binary: Path, spec: SliceSpec, outdir: Path, datadir: Path, logfi
         raise SliceArgsError("At least one model and one filament are required")
     if spec.plate < 0 or spec.plate > 99:
         raise SliceArgsError("Invalid plate")
+    if spec.filament_ids and (
+        len(spec.filament_ids) != len(spec.inputs)
+        or any(not 1 <= slot <= len(spec.filament_jsons) for slot in spec.filament_ids)
+    ):
+        raise SliceArgsError("Each input needs a valid filament slot")
     args = [
         _safe_path(binary),
         "--datadir", _safe_path(datadir),
@@ -137,6 +143,8 @@ def build_args(binary: Path, spec: SliceSpec, outdir: Path, datadir: Path, logfi
         "--logfile", _safe_path(logfile),
         "--debug", "2",
     ]
+    if spec.filament_ids:
+        args += ["--load-filament-ids", ",".join(map(str, spec.filament_ids))]
     if spec.arrange:
         args += ["--arrange", "1"]
     if spec.orient:

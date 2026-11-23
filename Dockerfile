@@ -24,6 +24,7 @@ ENV TITLE="OrcaSlicer" \
 # Runtime libraries needed by the OrcaSlicer AppImage (GUI and CLI).
 # Firefox: Orca's cloud/Google sign-in opens a browser and redirects back to localhost.
 RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         python3 python3-venv ca-certificates locales fonts-dejavu-core \
         libgtk-3-0t64 libwebkit2gtk-4.1-0 libgl1 libegl1 libglu1-mesa libosmesa6 \

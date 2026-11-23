@@ -106,6 +106,21 @@ def test_full_coverage_keeps_one_run(svc, settings):
     assert "plates" not in svc.jobs.get(job_id)["stats"]
 
 
+def test_filament_slots_follow_copies_across_beds(svc, settings):
+    models = [_stl_model(svc, settings), _stl_model(svc, settings)]
+    req = JobRequest(models, "P", "Q", ["F", "F"], copies=[1, 2], model_filaments=[2, 1],
+                     filament_colors=["#123456", "#abcdef"], bed_coverage=50)
+    job_id = svc.jobs.submit(req)
+    mixed, single = _run_capturing(svc, settings, job_id)
+    assert mixed[mixed.index("--load-filament-ids") + 1] == "2,1"
+    assert single[single.index("--load-filament-ids") + 1] == "1"
+    assert "--enable-prime-tower=1" in mixed
+    assert not any(arg.startswith("--enable-prime-tower") for arg in single)
+    profiles = svc.jobs.job_dir(job_id) / "profiles"
+    assert json.loads((profiles / "filament_1.json").read_text())["filament_colour"] == ["#abcdef"]
+    assert svc.jobs.get(job_id)["params"]["model_filaments"] == [2, 1]
+
+
 def test_each_3mf_plate_on_its_own_bed(svc, settings):
     mid = uuid.uuid4().hex
     svc.db.execute(

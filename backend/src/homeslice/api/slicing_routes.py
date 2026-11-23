@@ -21,11 +21,14 @@ class JobBody(BaseModel):
     printer: str = Field(min_length=1, max_length=200)
     process: str = Field(min_length=1, max_length=200)
     filaments: list[str] = Field(min_length=1, max_length=16)
+    paint_slots: list[Annotated[int, Field(strict=True, ge=1, le=16)]] = Field(default_factory=list, max_length=16)
+    filament_colors: list[Annotated[str, Field(pattern=r"^(#[0-9A-Fa-f]{6})?$")]] = Field(default_factory=list, max_length=16)
     overrides: dict[str, str] = Field(default_factory=dict, max_length=32)
     arrange: bool = True
     orient: bool = False
     plate: int = Field(default=0, ge=0, le=99)
     copies: list[int] = Field(default_factory=list, max_length=50)
+    model_filaments: list[Annotated[int, Field(strict=True, ge=1, le=16)]] = Field(default_factory=list, max_length=50)
     model_plates: list[int] = Field(default_factory=list, max_length=50)
     plate_selection: list[Annotated[list[Annotated[int, Field(ge=1, le=999)]], Field(max_length=200)]] = Field(
         default_factory=list, max_length=50
@@ -168,6 +171,8 @@ def reslice_for_printer(
             "or re-slice from the Slice page to pick them.",
         )
     params = dict(job["params"])
+    if params.get("model_filaments") or params.get("paint_slots") or any(params.get("filament_colors") or []):
+        raise HTTPException(400, "Open the job in Slice to review filament slots before changing printers.")
     overrides = dict(params.get("overrides") or {})
     if printer["default_bed_type"]:
         overrides["curr_bed_type"] = printer["default_bed_type"]

@@ -15,6 +15,7 @@ interface Parsed {
 }
 
 const SUPPORT_COLOUR = 0xf59e0b;
+const TOWER_COLOUR = 0xfb7185;
 
 /** Extrusion lines coloured per segment: model in the accent colour, supports in amber. */
 function extrusionLines(data: Float32Array, support: Uint8Array): THREE.LineSegments {
@@ -23,8 +24,9 @@ function extrusionLines(data: Float32Array, support: Uint8Array): THREE.LineSegm
   const colours = new Float32Array(data.length);
   const model = new THREE.Color(ACCENT);
   const sup = new THREE.Color(SUPPORT_COLOUR);
+  const tower = new THREE.Color(TOWER_COLOUR);
   for (let s = 0; s < support.length; s++) {
-    const c = support[s] ? sup : model;
+    const c = support[s] === 2 ? tower : support[s] === 1 ? sup : model;
     colours.set([c.r, c.g, c.b, c.r, c.g, c.b], s * 6);
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colours, 3));
@@ -48,6 +50,7 @@ export default function GcodeViewer({ jobId, file, printerPreset }: { jobId: str
   const [layer, setLayer] = useState(0);
   const [showTravel, setShowTravel] = useState(false);
   const [hasSupport, setHasSupport] = useState(false);
+  const [hasTower, setHasTower] = useState(false);
   const [status, setStatus] = useState("Loading G-code…");
 
   useEffect(() => {
@@ -81,6 +84,7 @@ export default function GcodeViewer({ jobId, file, printerPreset }: { jobId: str
       if (cancelled) return;
       setParsed(result);
       setHasSupport(result.extSupport.some((v) => v === 1));
+      setHasTower(result.extSupport.some((v) => v === 2));
       setLayer(Math.max(0, result.layerZ.length - 1));
       setStatus(result.layerZ.length ? "" : "No layers found in this G-code.");
     })().catch((e) => !cancelled && setStatus((e as Error).message));
@@ -165,6 +169,7 @@ export default function GcodeViewer({ jobId, file, printerPreset }: { jobId: str
             />
           </label>
           <div className="row small gcode-legend" aria-label="Colour key">
+            {hasTower && <span><i style={{ background: "#fb7185" }} /> Prime tower</span>}
             <span>
               <i style={{ background: "#14b8a6" }} /> Model
             </span>

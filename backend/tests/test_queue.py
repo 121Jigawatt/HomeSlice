@@ -105,6 +105,19 @@ def test_queue_skips_busy_offline_and_error_printers(printer_setup):
     assert uploads(fake) == 0
 
 
+def test_queue_tracks_only_matching_bed_results(printer_setup):
+    authed, fake, printer = printer_setup
+    item = queue(authed, make_done_job(authed), printer)
+    assert dispatch(authed) == [item["id"]]
+    fake.state = "complete"
+    fake.filename = "unrelated.gcode"
+    dispatch(authed)
+    assert authed.get("/api/queue").json()[0]["status"] == "sent"
+    fake.filename = authed.app.state.services.queue._queued_name(item)
+    dispatch(authed)
+    assert authed.get("/api/queue").json()[0]["status"] == "printed"
+
+
 def test_queue_reorder_and_cancel(printer_setup):
     authed, fake, printer = printer_setup
     a = queue(authed, make_done_job(authed), printer)
