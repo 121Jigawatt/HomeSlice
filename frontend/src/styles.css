@@ -226,6 +226,8 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .bed-mode label.check { gap: 0.45rem; min-height: 40px; }
 .bed-mode input[type="radio"] { width: 1.1rem; height: 1.1rem; min-height: 0; accent-color: var(--accent); }
 .copies { display: flex; flex-direction: column; gap: 0.2rem; }
+.picked-filament { flex: 1 1 8rem; min-width: 0; gap: 0.2rem; font-size: 0.85rem; }
+.picked-filament select { min-width: 0; min-height: 44px; padding: 0.35rem; }
 .quantity { display: inline-flex; align-items: center; gap: 0.25rem; flex: 0 0 auto; }
 .quantity input { width: 3.6rem; text-align: center; padding: 0.55rem 0.25rem; -moz-appearance: textfield; }
 .quantity input::-webkit-inner-spin-button, .quantity input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
@@ -290,6 +292,18 @@ details summary { cursor: pointer; padding: 0.35rem 0; }
 .job-row.selected { border-color: var(--accent); }
 .form-grid { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
 .form-grid > legend { grid-column: 1 / -1; }
+.filament-section { border: 0; padding: 0; display: grid; gap: 0.5rem; }
+.filament-section > legend { padding: 0; margin-bottom: 0.35rem; }
+.filament-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.35rem 0.65rem; }
+.filament-map { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); align-items: center; gap: 0.45rem; overflow-wrap: anywhere; }
+.filament-source { display: flex; align-items: center; gap: 0.35rem; }
+.filament-chip { width: 1rem; height: 1rem; flex: none; border: 1px solid var(--border); border-radius: 3px; }
+.filament-slot { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
+.filament-slot > label { flex: 0 0 1.4rem; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
+.filament-section :is(select, input) { min-width: 0; min-height: 44px; padding: 0.35rem; }
+.filament-slot > select { flex: 1; }
+.filament-slot > input[type="color"], .filament-slot > button { flex: 0 0 44px; width: 44px; height: 44px; }
+.filament-add { justify-self: start; }
 .row.nowrap { flex-wrap: nowrap; }
 .sub-card { border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem; background: rgba(255, 255, 255, 0.02); }
 .user-row { border-bottom: 1px solid var(--border); padding-bottom: 0.6rem; }

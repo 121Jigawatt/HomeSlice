@@ -2,6 +2,7 @@ import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, Job, Model, Preset, Printer as PrinterConfig } from "../api";
 import { ModelPicker } from "../ModelPicker";
+import { Icon } from "../icons";
 import { ModelPart, PlateChoice, planBeds, plateRequest, polygonArea } from "../bedPlan";
 import { BED_TYPES, bedLabel, displayName } from "../presetNames";
 import { formatDuration, IDLE_STATES, PrinterBadge, useLivePrinters } from "../printers";
@@ -482,6 +483,18 @@ export default function SlicePage() {
           onCopies={(id, n) => setCopies((c) => ({ ...c, [id]: n }))}
           plateChoice={(m) => choiceOf(m)}
           onPlateChoice={(id, c) => setPlateChoices((cur) => ({ ...cur, [id]: c }))}
+          renderFilament={(model) => !painted && (filaments.length > 1 || usesModelSlots) && (
+            <label className="picked-filament">
+              <span className="muted">Filament slot</span>
+              <select aria-label={`Filament slot for ${model.filename}`} value={filamentOf(model.id)}
+                onChange={(event) => setModelFilaments((slots) => ({ ...slots, [model.id]: Number(event.target.value) }))}>
+                <option value={0} disabled>Select a slot</option>
+                {filaments.map((name, index) => <option key={index} value={index + 1} disabled={!name}>
+                  {index + 1}: {displayName(name)}
+                </option>)}
+              </select>
+            </label>
+          )}
         />
         {selected.size > 0 && (
           <section className="stack beds" aria-labelledby="beds-title">
@@ -639,151 +652,6 @@ export default function SlicePage() {
         </button>
       </section>
 
-      <fieldset className="card stack">
-        <legend>Profiles</legend>
-        {!presetsLoaded && <p className="muted small">Loading presets…</p>}
-        {noUserPresets && (
-          <p className="muted small">
-            No custom presets found. Create or import them in Full Orca, or show system presets.
-          </p>
-        )}
-        <label className="row check">
-          <input type="checkbox" checked={includeSystem} onChange={(e) => setIncludeSystem(e.target.checked)} />
-          Show system presets enabled in Orca
-        </label>
-        <label>
-          Printer
-          {target ? (
-            <select value={printer} disabled title={`Set by ${target.name}. Change it under Settings \u2192 Printers.`}>
-              <option value={printer}>{displayName(printer)} (from {target.name})</option>
-            </select>
-          ) : (
-            <select value={printer} onChange={(e) => { reviewFilamentSlots(); setPrinter(e.target.value); }} required title={printer}>
-              <option value="">Select…</option>
-              {options("printer")}
-            </select>
-          )}
-        </label>
-        <label>
-          Process
-          <select value={process} onChange={(e) => setProcess(e.target.value)} required title={process}>
-            <option value="">Select…</option>
-            {options("process")}
-          </select>
-        </label>
-        {printer && Object.keys(incompat.process).length > 0 && (
-          <p className="muted small">Presets made for other printers are greyed out.</p>
-        )}
-        {filaments.map((f, i) => (
-          <div className="stack" key={i}>
-            <label htmlFor={`filament-slot-${i}`}>Filament {filaments.length > 1 ? i + 1 : ""}</label>
-            <div className="row">
-              <select
-                id={`filament-slot-${i}`}
-                className="grow"
-                value={f}
-                title={f}
-                onChange={(e) => setFilaments(filaments.map((x, j) => (j === i ? e.target.value : x)))}
-                required
-              >
-                <option value="">Select…</option>
-                {options("filament")}
-              </select>
-              {filaments.length > 1 && (
-                <button
-                  type="button"
-                  className="small secondary"
-                  onClick={() => {
-                    setFilaments(filaments.filter((_, j) => j !== i));
-                    setPaintSlots([]);
-                    setFilamentColors((colors) => colors.filter((_, index) => index !== i));
-                    setModelFilaments((slots) => Object.fromEntries(Object.entries(slots).map(([id, slot]) => [
-                      id, slot === i + 1 ? (filaments.length === 2 ? 1 : 0) : slot > i + 1 ? slot - 1 : slot,
-                    ])));
-                  }}
-                  aria-label={`Remove filament ${i + 1}`}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-            {filaments.length > 1 && (
-              <div className="row">
-                <input
-                  type="color"
-                  aria-label={`Color for filament ${i + 1}`}
-                  title={`Color for filament ${i + 1}`}
-                  value={filamentColors[i] || "#f2754e"}
-                  style={{ width: "3rem" }}
-                  onChange={(event) => {
-                    const color = event.target.value;
-                    setFilamentColors((colors) => filaments.map((_, index) => index === i ? color : colors[index] ?? ""));
-                  }}
-                />
-                {filamentColors[i] ? (
-                  <button type="button" className="small secondary" onClick={() => setFilamentColors((colors) => colors.map((color, index) => index === i ? "" : color))}>
-                    Use preset color
-                  </button>
-                ) : <span className="muted">Preset color</span>}
-              </div>
-            )}
-            {palette.length > 0 && <label>
-              Spool label for slot {i + 1}
-              <input value={spoolLabel(i)} maxLength={80} onChange={(event) => {
-                const key = labelKey(i);
-                localStorage.setItem(key, event.target.value);
-                setSpoolLabels((labels) => ({ ...labels, [key]: event.target.value }));
-              }} />
-            </label>}
-          </div>
-        ))}
-        {filaments.length < 16 && (
-          <button type="button" className="small secondary" onClick={() => setFilaments([...filaments, ""])}>
-            + Add filament
-          </button>
-        )}
-        {palette.map((color, index) => (
-          <label key={index}>
-            <span className="row"><span aria-hidden="true" style={{ backgroundColor: color, width: "1rem", height: "1rem" }} /> Source color {index + 1}: {color}</span>
-            <select value={paintSlots[index] ?? 0} onChange={(event) => {
-              const slot = Number(event.target.value);
-              setPaintSlots((slots) => palette.map((_, position) => position === index ? slot : slots[position] ?? 0));
-            }}>
-              <option value={0}>Select a filament slot</option>
-              {filaments.map((name, slot) => <option disabled={!name} key={slot} value={slot + 1}>
-                {slot + 1}: {spoolLabel(slot) || displayName(name)}
-              </option>)}
-            </select>
-          </label>
-        ))}
-        {!painted && (filaments.length > 1 || usesModelSlots) && selectedModels.map((model) => (
-          <label key={model.id}>
-            Filament slot for {model.filename}
-            <select
-              value={filamentOf(model.id)}
-              onChange={(event) => setModelFilaments((slots) => ({ ...slots, [model.id]: Number(event.target.value) }))}
-            >
-              <option value={0} disabled>Select a filament slot</option>
-              {filaments.map((name, index) => (
-                <option key={index} value={index + 1} disabled={!name}>
-                  {index + 1}: {displayName(name)}
-                </option>
-              ))}
-            </select>
-          </label>
-        ))}
-        <label>
-          Plate type
-          <select value={bedType} onChange={(e) => setBedType(e.target.value)}>
-            {BED_TYPES.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </fieldset>
-
       <fieldset className="card form-grid">
         <legend>Quick overrides (optional)</legend>
         <label>
@@ -824,6 +692,147 @@ export default function SlicePage() {
           <input type="checkbox" checked={orient} onChange={(e) => setOrient(e.target.checked)} /> Auto-orient
         </label>
       </fieldset>
+
+      <fieldset className="card stack">
+        <legend>Profiles</legend>
+        {!presetsLoaded && <p className="muted small">Loading presets…</p>}
+        {noUserPresets && (
+          <p className="muted small">
+            No custom presets found. Create or import them in Full Orca, or show system presets.
+          </p>
+        )}
+        <label className="row check">
+          <input type="checkbox" checked={includeSystem} onChange={(e) => setIncludeSystem(e.target.checked)} />
+          Show system presets enabled in Orca
+        </label>
+        <label>
+          Printer
+          {target ? (
+            <select value={printer} disabled title={`Set by ${target.name}. Change it under Settings \u2192 Printers.`}>
+              <option value={printer}>{displayName(printer)} (from {target.name})</option>
+            </select>
+          ) : (
+            <select value={printer} onChange={(e) => { reviewFilamentSlots(); setPrinter(e.target.value); }} required title={printer}>
+              <option value="">Select…</option>
+              {options("printer")}
+            </select>
+          )}
+        </label>
+        <label>
+          Process
+          <select value={process} onChange={(e) => setProcess(e.target.value)} required title={process}>
+            <option value="">Select…</option>
+            {options("process")}
+          </select>
+        </label>
+        {printer && Object.keys(incompat.process).length > 0 && (
+          <p className="muted small">Presets made for other printers are greyed out.</p>
+        )}
+        <fieldset className="filament-section span-2">
+          <legend>Filaments</legend>
+          {palette.length > 0 && (
+            <div className="filament-grid" role="group" aria-label="Filament mapping">
+              {palette.map((color, index) => (
+                <label className="filament-map" key={index}>
+                  <span className="filament-source"><span aria-hidden="true" className="filament-chip" style={{ backgroundColor: color }} />{color}</span>
+                  <select aria-label={`Source color ${index + 1}: ${color}`} value={paintSlots[index] ?? 0} onChange={(event) => {
+                    const slot = Number(event.target.value);
+                    setPaintSlots((slots) => palette.map((_, position) => position === index ? slot : slots[position] ?? 0));
+                  }}>
+                    <option value={0}>Select a slot</option>
+                    {filaments.map((name, slot) => <option disabled={!name} key={slot} value={slot + 1}>
+                      {slot + 1}: {spoolLabel(slot) || displayName(name)}
+                    </option>)}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="filament-grid">
+            {filaments.map((f, i) => (
+              <div className="filament-slot" key={i}>
+                <label htmlFor={`filament-slot-${i}`}><span aria-hidden="true">{i + 1}</span><span className="sr-only">Filament {i + 1}</span></label>
+              <select
+                id={`filament-slot-${i}`}
+                value={f}
+                title={f}
+                onChange={(e) => setFilaments(filaments.map((x, j) => (j === i ? e.target.value : x)))}
+                required
+              >
+                <option value="">Select…</option>
+                {options("filament")}
+              </select>
+              {filaments.length > 1 && (
+                <input
+                  type="color"
+                  aria-label={`Color for filament ${i + 1}`}
+                  title={`Filament ${i + 1}: ${filamentColors[i] || (painted ? "project color" : "preset color")}`}
+                  value={filamentColors[i] || "#f2754e"}
+                  onChange={(event) => {
+                    const color = event.target.value;
+                    setFilamentColors((colors) => filaments.map((_, index) => index === i ? color : colors[index] ?? ""));
+                  }}
+                />
+              )}
+              {filaments.length > 1 && filamentColors[i] && (
+                <button type="button" className="icon-button secondary" title="Reset color"
+                  aria-label={`Reset color for filament ${i + 1}`}
+                  onClick={() => setFilamentColors((colors) => colors.map((color, index) => index === i ? "" : color))}>
+                  <Icon name="ready" size={14} />
+                </button>
+              )}
+              {filaments.length > 1 && (
+                <button
+                  type="button"
+                  className="icon-button secondary"
+                  title={`Remove filament ${i + 1}`}
+                  onClick={() => {
+                    setFilaments(filaments.filter((_, j) => j !== i));
+                    setPaintSlots([]);
+                    setFilamentColors((colors) => colors.filter((_, index) => index !== i));
+                    setModelFilaments((slots) => Object.fromEntries(Object.entries(slots).map(([id, slot]) => [
+                      id, slot === i + 1 ? (filaments.length === 2 ? 1 : 0) : slot > i + 1 ? slot - 1 : slot,
+                    ])));
+                  }}
+                  aria-label={`Remove filament ${i + 1}`}
+                >
+                  <Icon name="close" size={16} />
+                </button>
+              )}
+              </div>
+            ))}
+          </div>
+          {filaments.length < 16 && (
+            <button type="button" className="small secondary filament-add" onClick={() => setFilaments([...filaments, ""])}>
+              + Add filament
+            </button>
+          )}
+          {palette.length > 0 && <details>
+            <summary>Spool labels</summary>
+            <div className="filament-grid">
+              {filaments.map((_, index) => <label className="filament-map" key={index}>
+                Slot {index + 1}
+                <input aria-label={`Spool label for slot ${index + 1}`} value={spoolLabel(index)} maxLength={80} onChange={(event) => {
+                  const key = labelKey(index);
+                  localStorage.setItem(key, event.target.value);
+                  setSpoolLabels((labels) => ({ ...labels, [key]: event.target.value }));
+                }} />
+              </label>)}
+            </div>
+          </details>}
+        </fieldset>
+        <label>
+          Plate type
+          <select value={bedType} onChange={(e) => setBedType(e.target.value)}>
+            {BED_TYPES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </fieldset>
+
     </form>
   );
 }

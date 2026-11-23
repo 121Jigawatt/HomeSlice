@@ -102,6 +102,7 @@ export function ModelPicker({
   onCopies,
   plateChoice,
   onPlateChoice,
+  renderFilament,
 }: {
   models: Model[];
   loaded: boolean;
@@ -111,6 +112,7 @@ export function ModelPicker({
   onCopies: (id: string, n: number) => void;
   plateChoice: (m: Model) => PlateChoice | undefined;
   onPlateChoice: (id: string, choice: PlateChoice) => void;
+  renderFilament: (model: Model) => React.ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
@@ -159,6 +161,7 @@ export function ModelPicker({
                   <span className="small muted">Copies</span>
                   <Quantity name={m.filename} value={copies[m.id] ?? 1} onChange={(n) => onCopies(m.id, n)} />
                 </div>
+                {renderFilament(m)}
               </div>
             </li>
           ))}
