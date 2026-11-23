@@ -142,7 +142,8 @@ def test_3mf_sliced_as_objects_without_project_settings(settings):
         services.db.close()
 
 
-def test_painted_project_slices_with_target_profiles(settings, monkeypatch):
+@pytest.mark.parametrize("mixed", [False, True])
+def test_painted_project_slices_with_target_profiles(settings, monkeypatch, mixed):
     services = build_services(settings)
     try:
         add_presets(settings)
@@ -173,14 +174,30 @@ def test_painted_project_slices_with_target_profiles(settings, monkeypatch):
 
         async def fake_run(args, cwd, timeout, memory):
             seen.append(args)
-            return RunResult(1, False, "")
+            output = Path(args[args.index("--outputdir") + 1])
+            (output / "plate_1.gcode").write_text("; estimated printing time (normal mode) = 10m\nG28\n")
+            return RunResult(0, False, "")
 
         monkeypatch.setattr(jobs_module, "run_orca", fake_run)
         monkeypatch.setattr(services.versions, "current_binary", lambda: settings.data_dir / "AppRun")
-        job_id = services.jobs.submit(JobRequest([model_id], "P", "Q", ["F", "F"], arrange=False,
-                             model_filaments=[1], filament_colors=["", "#ffffff"]))
+        models, slots = [model_id], [1]
+        if mixed:
+            from test_beds import _stl_model
+
+            models = [_stl_model(services, settings), model_id, _stl_model(services, settings)]
+            slots = [2, 1, 1]
+        job_id = services.jobs.submit(JobRequest(models, "P", "Q", ["F", "F"], arrange=False,
+                             model_filaments=slots, filament_colors=["", "#ffffff"], bed_coverage=100))
         asyncio.run(services.jobs._run(job_id))
-        args, = seen
+        job = services.jobs.get(job_id)
+        assert job["status"] == "done", job["error"]
+        assert len(seen) == (2 if mixed else 1)
+        if mixed:
+            assert job["files"] == ["plate_1.gcode", "plate_2.gcode"]
+            mesh_args = seen[1]
+            assert mesh_args[mesh_args.index("--load-filament-ids") + 1] == "2,1"
+            assert [Path(path).stem for path in mesh_args[-2:]] == [models[0], models[2]]
+        args = seen[0]
         assert "--arrange" in args and "--enable-prime-tower=1" in args
         assert "--load-filament-ids" not in args
         printer, process = args[args.index("--load-settings") + 1].split(";")

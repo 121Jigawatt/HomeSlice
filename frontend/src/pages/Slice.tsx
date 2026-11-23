@@ -296,14 +296,14 @@ export default function SlicePage() {
     if (!bedArea || selectedModels.some((m) => !partsByModel[m.id])) return null;
     const order = [...selected].map((id) => selectedModels.find((m) => m.id === id)).filter((m): m is Model => !!m);
     return planBeds(
-      order.map((m) => ({ model: m, copies: countOf(m.id), ...plateRequest(m, choiceOf(m)), parts: partsByModel[m.id] })),
+      order.map((m) => ({ model: m, painted: !!palettes[m.id]?.length, copies: countOf(m.id), ...plateRequest(m, choiceOf(m)), parts: partsByModel[m.id] })),
       coverage,
       bedArea,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedModels, selected, partsByModel, bedArea, coverage, copies, plateChoices]);
+  }, [selectedModels, selected, partsByModel, bedArea, coverage, copies, plateChoices, palettes]);
   const bed = beds?.[Math.min(bedIndex, beds.length - 1)];
-  const sharedBeds = beds?.some((b) => b.projectPlate === undefined && b.parts.length > 0) ?? false;
+  const sharedBeds = beds?.some((b) => !b.painted && b.projectPlate === undefined && b.parts.length > 0) ?? false;
   const totalObjects = beds ? beds.reduce((n, b) => n + b.parts.length, 0) : selectedModels.length;
   const chosenFilaments = filaments.filter(Boolean);
   const projects = selectedModels.filter((model) => model.ext === ".3mf");
@@ -323,8 +323,9 @@ export default function SlicePage() {
   const usesModelSlots = [...selected].some((id) => modelFilaments[id] !== undefined);
   const filamentOf = (id: string) => modelFilaments[id] ?? 1;
   const slotColors = useMemo(() => filaments.map((name, index) =>
-    filamentColors[index] || presets.filament.find((preset) => preset.name === name)?.color || "#f2754e",
-  ), [filaments, filamentColors, presets.filament]);
+    filamentColors[index] || (painted ? palettes[painted.id][paintSlots.indexOf(index + 1)] : undefined)
+      || presets.filament.find((preset) => preset.name === name)?.color || "#f2754e",
+  ), [filaments, filamentColors, painted, palettes, paintSlots, presets.filament]);
   const previewModels = useMemo(() => bed?.parts.map(({ model, item }) => {
     const index = (modelFilaments[model.id] ?? 1) - 1;
     return { ...model, item, color: !palettes[model.id]?.length && filaments[index] ? slotColors[index] : undefined };
@@ -346,10 +347,10 @@ export default function SlicePage() {
     if (paletteErrors[project.id]) blockers.push(paletteErrors[project.id]);
     else if (!palettes[project.id]) blockers.push(`Checking colors for ${project.filename}…`);
   }
-  if (painted && selected.size !== 1) blockers.push("Slice the painted 3MF separately from other files.");
+  if (projects.filter((model) => palettes[model.id]?.length).length > 1) blockers.push("Select only one painted 3MF per job.");
   if (painted && (chosenFilaments.length !== filaments.length || paintSlots.length !== palette.length || new Set(paintSlots).size !== palette.length || paintSlots.some((slot) => !filaments[slot - 1])))
     blockers.push("Map each source color to a different filament slot.");
-  if (!painted && usesModelSlots && (chosenFilaments.length !== filaments.length || [...selected].some((id) => !filaments[filamentOf(id) - 1])))
+  if (usesModelSlots && (chosenFilaments.length !== filaments.length || [...selected].some((id) => id !== painted?.id && !filaments[filamentOf(id) - 1])))
     blockers.push("Choose a valid filament slot for each model.");
   chosenFilaments
     .filter((f) => incompat.filament[f])
@@ -418,7 +419,7 @@ export default function SlicePage() {
         json: {
           model_ids: [...selected],
           copies: [...selected].map(countOf),
-          model_filaments: !painted && usesModelSlots ? [...selected].map(filamentOf) : [],
+          model_filaments: usesModelSlots ? [...selected].map((id) => id === painted?.id ? 1 : filamentOf(id)) : [],
           paint_slots: painted ? paintSlots : [],
           ...(() => {
             const reqs = [...selected].map((id) => {
@@ -503,7 +504,7 @@ export default function SlicePage() {
                 </label>
               ))}
             </div>
-          ) : !painted && (filaments.length > 1 || usesModelSlots) && (
+          ) : (filaments.length > 1 || usesModelSlots) && (
             <label className="picked-filament">
               <span className="muted filament-source">
                 {filaments[filamentOf(model.id) - 1] && <span aria-hidden="true" className="filament-chip" style={{ backgroundColor: slotColors[filamentOf(model.id) - 1] }} />}
@@ -521,6 +522,7 @@ export default function SlicePage() {
         />
         {selected.size > 0 && (
           <section className="stack beds" aria-labelledby="beds-title">
+            {painted && selected.size > 1 && <p className="muted small">The painted 3MF is sliced on separate beds from the other models to preserve its colors.</p>}
             <div className="row between">
               <strong id="beds-title">
                 {beds ? `${beds.length} bed${beds.length === 1 ? "" : "s"}` : "Planning beds…"}

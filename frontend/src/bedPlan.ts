@@ -16,6 +16,7 @@ export interface PlannedPart {
 
 export interface Bed {
   parts: PlannedPart[];
+  painted?: boolean;
   /** A 3MF project plate kept as its own bed. */
   projectPlate?: number;
   coverage: number;
@@ -23,6 +24,7 @@ export interface Bed {
 
 export interface PlanEntry {
   model: Model;
+  painted?: boolean;
   copies: number;
   /** 3MF: >0 one saved plate, 0 every object together, -1 each saved plate on its own bed. */
   plate: number;
@@ -71,6 +73,7 @@ export function polygonArea(points: [number, number][]): number {
  * rest packed in order, starting a new bed once footprints would exceed `coverage`% of the bed.
  */
 export function planBeds(entries: PlanEntry[], coverage: number, bedArea: number): Bed[] {
+  const painted: Bed[] = [];
   const fixed: Bed[] = [];
   const loose: PlannedPart[] = [];
   const area = (parts: PlannedPart[]) => parts.reduce((n, p) => n + p.footprint, 0);
@@ -88,7 +91,7 @@ export function planBeds(entries: PlanEntry[], coverage: number, bedArea: number
         const objs = e.parts.filter((p) => p.plate === plate.index);
         for (let c = 0; c < e.copies; c++) {
           const parts = objs.map((p) => toPart(p, c));
-          fixed.push({ parts, projectPlate: plate.index, coverage: (area(parts) / bedArea) * 100 });
+          (e.painted ? painted : fixed).push({ parts, painted: e.painted, projectPlate: plate.index, coverage: (area(parts) / bedArea) * 100 });
         }
       }
     } else {
@@ -97,10 +100,12 @@ export function planBeds(entries: PlanEntry[], coverage: number, bedArea: number
         : e.plate > 0
           ? e.parts.filter((p) => p.plate === e.plate)
           : e.parts.filter((p) => wanted(p.plate));
-      for (let c = 0; c < e.copies; c++) objs.forEach((p) => loose.push(toPart(p, c)));
+      const parts = Array.from({ length: e.copies }, (_, copy) => objs.map((part) => toPart(part, copy))).flat();
+      if (e.painted) painted.push({ parts, painted: true, coverage: (area(parts) / bedArea) * 100 });
+      else loose.push(...parts);
     }
   });
-  const beds: Bed[] = [...fixed];
+  const beds: Bed[] = [...painted, ...fixed];
   if (loose.length <= 1) {
     if (loose.length) beds.push({ parts: loose, coverage: (area(loose) / bedArea) * 100 });
     return beds;

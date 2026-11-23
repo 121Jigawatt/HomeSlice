@@ -30,11 +30,25 @@ async function loadModel(m: PreviewModel): Promise<THREE.Object3D> {
     throw new Error(detail || `Could not load ${m.filename}`);
   }
   const data = await res.arrayBuffer();
+  if (data.byteLength > MAX_PREVIEW_BYTES) throw new Error(`${m.filename}: preview mesh is too large.`);
   const material = new THREE.MeshStandardMaterial({ color: m.color ?? ACCENT, roughness: 0.6, metalness: 0.05 });
   if (m.ext === ".stl" || viaServer) {
-    const geo = new STLLoader().parse(data);
-    geo.computeVertexNormals();
-    return new THREE.Mesh(geo, material);
+    try {
+      if (data.byteLength < 84) throw new Error("Incomplete STL header");
+      const expected = 84 + new DataView(data).getUint32(80, true) * 50;
+      const header = new TextDecoder().decode(data.slice(0, 9));
+      if (expected > data.byteLength && !/^[\s\S]{0,4}solid/.test(header)) throw new Error("Incomplete STL triangles");
+      const geo = new STLLoader().parse(data);
+      if (!geo.getAttribute("position").count) {
+        geo.dispose();
+        throw new Error("Empty STL geometry");
+      }
+      geo.computeVertexNormals();
+      return new THREE.Mesh(geo, material);
+    } catch {
+      material.dispose();
+      throw new Error(`${m.filename}: preview data is not a complete STL mesh. Try reloading or re-uploading the model.`);
+    }
   }
   if (m.ext === ".obj") {
     const group = new OBJLoader().parse(new TextDecoder().decode(data));

@@ -501,13 +501,13 @@ class JobManager:
                 self._profiles.write_resolved("filament", name, profiles_dir / f"filament_{i}.json")
                 for i, name in enumerate(req.filaments)
             ]
-            painted_inputs, palette = await asyncio.to_thread(self._prepare_painted_project, req, jdir)
-            painted_project = bool(painted_inputs)
+            painted_index, painted_inputs, palette = await asyncio.to_thread(self._prepare_painted_project, req, jdir)
             colors = req.filament_colors
             if palette:
                 colors = [color or original for color, original in zip(colors or [""] * len(palette), palette)]
             size_for_filaments(process, filaments, colors)
-            groups = [[(path, 1)] for path in painted_inputs] if painted_project else await self._plate_groups(req, jdir, printer)
+            groups = [[(path, 1)] for path in painted_inputs]
+            groups.extend(await self._plate_groups(req, jdir, printer, skip_index=painted_index))
             if any(path is None for group in groups for path, _ in group):
                 raise SliceArgsError("A selected model no longer exists")
         except (ProfileError, SliceArgsError, StepError, ThumbnailError, zipfile.BadZipFile, OSError, ValueError) as e:
@@ -517,6 +517,7 @@ class JobManager:
         gcodes: list[Path] = []
         logs: list[str] = []
         for r, group in enumerate(groups, start=1):
+            painted_project = r <= len(painted_inputs)
             run_out = outdir / f"run_{r}" if len(groups) > 1 else outdir
             run_out.mkdir(parents=True, exist_ok=True)
             slots = [slot for _, slot in group] if req.model_filaments and not painted_project else []
@@ -590,18 +591,21 @@ class JobManager:
         shutil.rmtree(datadir, ignore_errors=True)
         self._finish(job_id, "done", None, combine_stats([parse_gcode_stats(g) for g in gcodes]))
 
-    def _prepare_painted_project(self, req: JobRequest, jdir: Path) -> tuple[list[Path], list[str]]:
-        for model_id in req.model_ids:
+    def _prepare_painted_project(self, req: JobRequest, jdir: Path) -> tuple[int | None, list[Path], list[str]]:
+        painted = []
+        for index, model_id in enumerate(req.model_ids):
             source = self._library.path_for(model_id)
-            if source is None or source.suffix != ".3mf" or not threemf.source_palette(source):
-                continue
-            if len(req.model_ids) != 1:
-                raise SliceArgsError("Slice a painted 3MF separately from other files")
-            if req.model_filaments and req.model_filaments != [1]:
+            if source is not None and source.suffix == ".3mf" and threemf.source_palette(source):
+                painted.append((index, source))
+        if len(painted) > 1:
+            raise SliceArgsError("Select only one painted 3MF per job")
+        if painted:
+            index, source = painted[0]
+            if req.model_filaments and req.model_filaments[index] != 1:
                 raise SliceArgsError("Painted 3MFs use their source slot order, not a single model slot")
-            copies, = req.counts()
-            plate, = req.plates_for()
-            selected, = req.selections()
+            copies = req.counts()[index]
+            plate = req.plates_for()[index]
+            selected = req.selections()[index]
             destinations = []
             palette = []
             if plate == SEPARATE_PLATES:
@@ -620,12 +624,14 @@ class JobManager:
                                                            req.paint_slots)
                     by_selection[key] = destination
                 destinations.append(by_selection[key])
-            return destinations, palette
+            return index, destinations, palette
         if req.paint_slots:
             raise SliceArgsError("Paint slot mapping requires a painted 3MF")
-        return [], []
+        return None, [], []
 
-    async def _plate_groups(self, req: JobRequest, jdir: Path, printer_json: Path) -> list[list[tuple[Path | None, int]]]:
+    async def _plate_groups(
+        self, req: JobRequest, jdir: Path, printer_json: Path, *, skip_index: int | None = None,
+    ) -> list[list[tuple[Path | None, int]]]:
         """Splits the objects into bed groups, each sliced by its own Orca run.
 
         A 3MF sliced with "each plate separately" keeps its plates; everything else is packed in order and a new
@@ -638,6 +644,8 @@ class JobManager:
         for i, (mid, n, plate, chosen, slot) in enumerate(
             zip(req.model_ids, req.counts(), req.plates_for(), req.selections(), slots)
         ):
+            if i == skip_index:
+                continue
             source = self._library.path_for(mid)
             if source is not None and source.suffix == ".3mf" and plate == SEPARATE_PLATES:
                 for p in await asyncio.to_thread(threemf.plates, source):
