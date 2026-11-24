@@ -89,7 +89,7 @@ export default function SlicePage() {
   const [plateChoices, setPlateChoices] = useState<Record<string, PlateChoice>>({});
   // Multi-plate 3MF projects default to their first plate rather than everything at once.
   const choiceOf = (m: Model): PlateChoice | undefined =>
-    plateChoices[m.id] ?? (m.plates && m.plates.length > 1 ? { plates: [m.plates[0].index], separate: true } : undefined);
+    m.plates && m.plates.length > 1 ? plateChoices[m.id] ?? { plates: [m.plates[0].index], separate: true } : undefined;
   const [includeSystem, setIncludeSystem] = useState(false);
   const [presets, setPresets] = useState<Record<Kind, Preset[]>>({ printer: [], process: [], filament: [] });
   const [presetsLoaded, setPresetsLoaded] = useState(false);
@@ -118,6 +118,7 @@ export default function SlicePage() {
   const [configs, setConfigs] = useState<PrinterConfig[] | null>(null);
   const [targetId, setTargetId] = useState("");
   const [prefilled, setPrefilled] = useState<boolean | null>(null);
+  const [coverageOverride, setCoverageOverride] = useState<number | undefined>();
   const target = configs?.find((c) => c.id === targetId && c.printer_preset);
   const machine = machines?.find((m) => m.id === target?.id);
 
@@ -128,6 +129,7 @@ export default function SlicePage() {
   }
 
   function applyTarget(c: PrinterConfig | undefined) {
+    setCoverageOverride(undefined);
     setTargetId(c?.id ?? "");
     localStorage.setItem("send.printer", c?.id ?? "");
     if (!c?.printer_preset) return;
@@ -173,8 +175,10 @@ export default function SlicePage() {
   useEffect(() => {
     const from = params.get("from");
     if (from) {
+      let cancelled = false;
       api<Job>(`/api/jobs/${from}`)
         .then((job) => {
+          if (cancelled) return;
           apply(fromJob(job));
           setSelected(new Set(job.params.model_ids));
           setCopies(Object.fromEntries(job.params.model_ids.map((id, i) => [id, job.params.copies?.[i] ?? 1])));
@@ -182,6 +186,7 @@ export default function SlicePage() {
           setModelFilaments(savedSlots?.length ? Object.fromEntries(job.params.model_ids.map((id, i) => [id, savedSlots[i]])) : {});
           setFilamentColors(job.params.filament_colors ?? []);
           setPaintSlots(job.params.paint_slots ?? []);
+          setCoverageOverride(job.params.bed_coverage);
           setPlateChoices(
             Object.fromEntries(
               job.params.model_ids.map((id, i) => {
@@ -195,10 +200,11 @@ export default function SlicePage() {
           setPrefilled(true);
         })
         .catch((e) => {
+          if (cancelled) return;
           setError(e.message);
           setPrefilled(false);
         });
-      return;
+      return () => { cancelled = true; };
     }
     const ids = params.getAll("model");
     const saved = ids.length === 1 ? localStorage.getItem(`slice.model.${ids[0]}`) : null;
@@ -275,7 +281,7 @@ export default function SlicePage() {
   // Bed plan: each model's printable objects (with footprints) and the bed outline, grouped like the server will.
   const [partsByModel, setPartsByModel] = useState<Record<string, ModelPart[]>>({});
   const [bedArea, setBedArea] = useState<number | null>(null);
-  const [coverage, setCoverage] = useState(50);
+  const coverage = coverageOverride ?? target?.bed_coverage ?? 50;
   const [bedIndex, setBedIndex] = useState(0);
   useEffect(() => {
     for (const id of selected) {
@@ -292,7 +298,6 @@ export default function SlicePage() {
       .then((b) => setBedArea(polygonArea(b.area) || 256 * 256))
       .catch(() => setBedArea(256 * 256));
   }, [printer]);
-  useEffect(() => setCoverage(target?.bed_coverage ?? 50), [target?.id, target?.bed_coverage]);
   const beds = useMemo(() => {
     if (!bedArea || selectedModels.some((m) => !partsByModel[m.id])) return null;
     const order = [...selected].map((id) => selectedModels.find((m) => m.id === id)).filter((m): m is Model => !!m);
@@ -544,7 +549,7 @@ export default function SlicePage() {
                   max={100}
                   step={5}
                   value={coverage}
-                  onChange={(e) => setCoverage(Number(e.target.value))}
+                  onChange={(e) => setCoverageOverride(Number(e.target.value))}
                   aria-valuetext={`${coverage}% of the bed`}
                 />
                 <b>{coverage}%</b>

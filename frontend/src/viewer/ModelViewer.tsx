@@ -119,7 +119,13 @@ export default function ModelViewer({ models, printerPreset }: { models: Preview
 
   useEffect(() => {
     if (!hostRef.current) return;
-    const viewer = createViewer(hostRef.current);
+    let viewer: Viewer;
+    try {
+      viewer = createViewer(hostRef.current);
+    } catch {
+      setStatus("3D preview unavailable in this browser. You can still edit settings and slice.");
+      return;
+    }
     viewerRef.current = viewer;
     return () => {
       viewer.dispose();

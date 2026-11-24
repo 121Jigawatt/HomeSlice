@@ -262,6 +262,11 @@ class ProfileStore:
             seen.add(current)
             ref = index.get((kind, current))
             if ref is None:
+                if chain:
+                    raise ProfileError(
+                        f"{kind.capitalize()} preset '{name}' needs the missing parent '{current}'. "
+                        "Restore that parent as a JSON preset, or select a preset with all its parents available."
+                    )
                 raise ProfileError(f"{kind} preset '{current}' not found")
             if system_name is None and ref.source == "system":
                 system_name = current

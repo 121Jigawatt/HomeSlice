@@ -143,7 +143,6 @@ def write_painted_project(
         if not items or not 1 <= len(items) * copies <= 200:
             raise ThumbnailError("Choose between 1 and 200 painted build objects, including copies")
         model = XML.Element("model", xmlns=_NS[1:-1], unit="millimeter")
-        XML.SubElement(model, "metadata", name="Application").text = "OrcaSlicer-2.4.0"
         XML.SubElement(model, "metadata", name="BambuStudio:3mfVersion").text = "1"
         resources = XML.SubElement(model, "resources")
         object_ids: dict[tuple[str, str | None, str | None], str] = {}

@@ -558,6 +558,14 @@ class JobManager:
                 )
                 return
             if result.returncode != 0 or not run_gcodes:
+                if result.returncode == -11:
+                    engine = self._versions.current() or "unknown version"
+                    input_kind = "painted 3MF" if painted_project else "mesh"
+                    logs.append(f"OrcaSlicer {engine}: {input_kind} bed group {r}/{len(groups)} crashed (SIGSEGV).")
+                    (jdir / "output.log").write_text("\n".join(logs), encoding="utf-8")
+                    self._finish(job_id, "failed", "OrcaSlicer crashed with a segmentation fault.",
+                                 error_code=-11, error_kind="crash")
+                    return
                 code, message = signed_code(result.returncode), None
                 try:
                     summary = json.loads((run_out / "result.json").read_text(encoding="utf-8"))

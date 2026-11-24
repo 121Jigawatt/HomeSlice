@@ -127,6 +127,7 @@ export interface Job {
     model_filaments?: number[];
     filament_colors?: string[];
     paint_slots?: number[];
+    bed_coverage?: number;
     model_plates?: number[];
     plate_selection?: number[][];
     printer: string;

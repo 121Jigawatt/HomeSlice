@@ -56,6 +56,14 @@ def test_filament_listing_colors(datadir):
     assert colors == {"Custom": "#01ab23", "Empty": "#f2754e", "Inherited": "#238bc4"}
 
 
+def test_missing_parent_names_selected_preset(datadir):
+    folder = datadir / "user/default/filament"
+    write(folder / "PETG ERCF.json", {"inherits": "My Generic PLA @MyToolChanger"})
+    write(folder / "My Generic PLA @MyToolChanger.json", {"inherits": "Generic PLA @MyToolChanger"})
+    with pytest.raises(ProfileError, match="PETG ERCF.*missing parent 'Generic PLA @MyToolChanger'"):
+        ProfileStore(datadir).resolve("filament", "PETG ERCF")
+
+
 def test_loop_and_missing(datadir):
     store = ProfileStore(datadir)
     with pytest.raises(ProfileError, match="loop"):

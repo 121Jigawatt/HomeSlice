@@ -211,6 +211,7 @@ def test_painted_project_slices_with_target_profiles(settings, monkeypatch, mixe
             assert set(archive.namelist()) == {"[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model"}
             mesh = archive.read("3D/3dmodel.model")
             assert b'paint_color="8"' in mesh and b"p:path" not in mesh
+            assert b'name="Application"' not in mesh
         assert threemf.item_meshes(rebuilt)[0][0, 0].tolist() == [120, 40, 0]
         swapped = settings.data_dir / "swapped.3mf"
         assert threemf.write_painted_project(source, swapped, 2, copies=2, slot_map=[2, 1]) == ["#0000ff", "#ff0000"]

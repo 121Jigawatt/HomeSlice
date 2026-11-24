@@ -37,6 +37,14 @@ def signed_code(returncode: int) -> int:
 
 
 def explain(code: int | None, raw: str | None, kind: str = "orca") -> dict[str, Any]:
+    if kind == "crash":
+        return {
+            "title": "OrcaSlicer crashed",
+            "cause": "The slicer process stopped unexpectedly with a segmentation fault.",
+            "fix": "Check Technical details for the engine version and bed. Try the same model and presets in Full OrcaSlicer.",
+            "code": code,
+            "raw": raw,
+        }
     if kind == "timeout":
         return {
             "title": "Slicing timed out",
