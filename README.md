@@ -33,11 +33,13 @@ A self-hosted, mobile-first front end for [OrcaSlicer](https://github.com/OrcaSl
 | | |
 | --- | --- |
 | 📚 **Model library** | Upload STL, 3MF, OBJ, STEP and AMF files (drag and drop works), or import from a Printables link. Thumbnails are rendered automatically. |
-| 🔪 **Slicing with your presets** | Uses the printer, process and filament presets you already have in OrcaSlicer, with quick overrides for layer height, infill, supports and plate type. |
-| 🧩 **Multi-plate projects** | Bambu Studio and OrcaSlicer 3MF projects keep their saved plates. Slice any set of plates, each on its own bed or packed together. |
-| 🛏️ **Bed planning** | Copies and loose parts are spread over as many beds as needed, filled to a per-printer limit. A 3D preview shows every bed before you slice. |
-| 👀 **G-code preview** | Scrub through layers in a 3D G-code viewer, with supports and travel moves. G-code files get embedded thumbnails for Mainsail, Fluidd and KlipperScreen. |
-| 🖨️ **Printers and queue** | Live status, temperatures and webcams for Klipper (Mainsail/Fluidd) printers. Send now or queue prints that start automatically once you confirm the bed is clear. |
+| 🔪 **Slicing with your presets** | Uses the selected printer, process and filament presets from OrcaSlicer, with quick overrides for layer height, infill, supports and plate type. Original printer settings embedded in a model never silently replace the selected target printer. |
+| 🧩 **Multi-plate projects** | Bambu Studio and OrcaSlicer 3MF projects keep their saved plates. Select any plates, print each on its own bed, or arrange selected objects together. Copies are included in the bed plan. |
+| 🎨 **Painted multicolor 3MF** | Keeps painted face colors and supported part-to-filament assignments. Map every source color to a distinct configured filament slot and optionally reorder colors. Orca arranges the project and positions the prime tower. |
+| 🧺 **Mixed-model jobs** | Combine one painted 3MF with STL/OBJ/STEP models. The painted project gets its own bed so face paint remains intact; other models get their own bed group and can use per-model filament slots. |
+| 🛏️ **Bed planning and preflight** | Copies and loose parts are spread over as many beds as needed, filled to a per-printer limit. Preview each planned bed, then inspect the sliced bed's printer profile, reported filament slots, prime-tower toolpath and estimated time before sending. |
+| 👀 **G-code preview** | Scrub through layers in a 3D G-code viewer, with supports, prime tower and travel moves distinguished. G-code files get embedded thumbnails for Mainsail, Fluidd and KlipperScreen. |
+| 🖨️ **Printers and queue** | Live status, temperatures and webcams for Klipper (Mainsail/Fluidd) printers. Send now or queue beds that start automatically once you confirm the bed is clear. Failed beds can be requeued individually. |
 | 🎯 **Per-printer defaults** | Link each printer to its OrcaSlicer profile so G-code can never be sent to the wrong machine. One tap re-slices a job for another printer. |
 | 👥 **Multi-user with roles** | Admin, Operator, Maker and Viewer roles, or your own from 14 permissions. Optional **Sign in with authentik** (OpenID Connect). |
 | 🖥️ **Full OrcaSlicer, too** | The complete OrcaSlicer desktop runs in the browser for preset editing and advanced plate work, using the same profiles. |
@@ -77,6 +79,18 @@ A self-hosted, mobile-first front end for [OrcaSlicer](https://github.com/OrcaSl
   <img src="docs/screenshots/mobile.png" alt="HomeSlice on a phone: library, bed plan and printer status" width="820"><br>
   <b>On your phone</b>: the whole app works one-handed, from upload to print.
 </p>
+
+## Multicolor and mixed-model slicing
+
+For a painted, single-object Bambu Studio or OrcaSlicer 3MF, HomeSlice reads the source palette and preserves per-face paint in a geometry-only 3MF. Its saved printer, process, filament presets and custom G-code are not sent to OrcaSlicer; HomeSlice supplies the profiles selected on the Slice page. This allows a project made for one printer to be sliced for another.
+
+In **Models → Filament mapping**, choose a different configured filament slot for each source color. Color swatches show the project palette, the selected slot color and any color override. The same source color cannot be mapped to two slots. Slot labels are manual notes; HomeSlice does not read live AMS or ERCF spool inventory.
+
+Painted 3MFs can be combined with STL, OBJ or STEP models. To retain face colors, HomeSlice slices the painted project in its own bed group and packs the other selected models into separate shared bed groups. Each non-painted model can be assigned a filament slot. Each group produces its own G-code, with the painted project first in the bed plan. The preview note and bed tabs show this separation before slicing.
+
+The **Bed preflight** shows the target printer profile, estimated time, filament slots detected in the G-code and whether a prime-tower path was found. These are slicer-reported estimates; HomeSlice does not currently calculate purge mass separately. After a queued file finishes, HomeSlice marks that bed printed when the printer reports the matching filename. If a bed fails, **Requeue bed** retries only that file; confirm the previous attempt is no longer printing first.
+
+Current painted-project limits: one painted 3MF per job, up to 200 build objects including copies, and normal printable parts. Painted modifier geometry is rejected rather than silently sliced without its intended color behavior. Multiple painted 3MFs in one job and live spool/AMS/ERCF synchronization are not supported yet.
 
 ## Quick start
 
@@ -181,7 +195,7 @@ flowchart LR
 | `/gui/` | Full OrcaSlicer desktop (Selkies) | Requires a HomeSlice login with the *Full OrcaSlicer* permission (nginx `auth_request`) |
 | `/api/*` | FastAPI backend | Runs the OrcaSlicer CLI in a sandboxed job queue |
 
-HomeSlice is an independent project, not affiliated with OrcaSlicer, and **does not fork it**. It downloads the official Linux release from GitHub, verifies it against the SHA-256 GitHub publishes, and runs it unmodified. 3MF projects are flattened to meshes before slicing, so Bambu Studio projects slice cleanly with your own presets, and STEP files are converted to meshes first.
+HomeSlice is an independent project, not affiliated with OrcaSlicer, and **does not fork it**. It downloads the official Linux release from GitHub, verifies it against the SHA-256 GitHub publishes, and runs it unmodified. Unpainted 3MF objects are flattened to meshes before slicing to avoid importing their embedded printer setup; painted 3MF projects are rebuilt with their face and supported part-color data intact. STEP files are converted to meshes first.
 
 ## Security
 
